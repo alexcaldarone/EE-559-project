@@ -41,7 +41,6 @@ def process_video(video_path, annotations, output_dir):
 
     # Get Hateful Snippets
     video_hate_snippets = eval(annotations[annotations['video_file_name'] == video_name]['hate_snippet'].values[0])
-    print(video_hate_snippets)
     video_hate_snippets_seconds = [[sum(x*int(t) for x, t in zip([3600, 60, 1], time.split(':'))) for time in hate_snippets] for hate_snippets in video_hate_snippets] # Convert to seconds
 
     # Check if snippets are less than 5 seconds appart then concatenate, format 00:00:00
@@ -54,9 +53,7 @@ def process_video(video_path, annotations, output_dir):
                 video_hate_snippets_concat[-1][1] = video_hate_snippets[i][1]
             else:
                 video_hate_snippets_concat.append(video_hate_snippets[i])
-        
-    print(video_hate_snippets_concat)
-    
+          
     # Create directory to save video snippet as mp4
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
