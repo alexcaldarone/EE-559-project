@@ -1,9 +1,24 @@
 import os
 import subprocess
 from pathlib import Path
+import numpy as np
 
 
-def extract_hate_snippet(video_path: Path, start: float, end: float, output_path: Path):
+def get_length(filename):
+    """
+    Get the length of a video file in seconds.
+    Source: https://stackoverflow.com/questions/3844430/how-to-get-the-duration-of-a-video-in-python
+    """
+
+    result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                             "format=duration", "-of",
+                             "default=noprint_wrappers=1:nokey=1", filename],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT)
+    return float(result.stdout)
+
+
+def extract_snippet(video_path: Path, start: float, end: float, output_path: Path):
     """
     Extracts a snippet from a video and saves it to the specified output path.
 
@@ -23,44 +38,69 @@ def extract_hate_snippet(video_path: Path, start: float, end: float, output_path
         "-c:v", "copy",
         "-c:a", "copy",
         "-y",
+        "-loglevel", "error",
+        "-hide_banner",
         str(output_path)
     ]
     subprocess.run(cmd, check=True)
 
 
-def process_video(video_path, annotations, output_dir):
+def process_video(video_path, annotations, output_dir, min_time=5):
     """
     Creates hate snippets from a video based on the provided annotations.
     
     Parameters:
     - video_path: str, path to the video file
     - annotations: pd.DataFrame, DataFrame containing the annotations
+    - output_dir: str, directory to save the output video snippets
+    - min_time: int, minimum time in seconds to consider a snippet
     """
 
     video_name = os.path.basename(video_path)
 
-    # Get Hateful Snippets
-    video_hate_snippets = eval(annotations[annotations['video_file_name'] == video_name]['hate_snippet'].values[0])
-    video_hate_snippets_seconds = [[sum(x*int(t) for x, t in zip([3600, 60, 1], time.split(':'))) for time in hate_snippets] for hate_snippets in video_hate_snippets] # Convert to seconds
+    if 'non_hate' in video_name:
+        # Get Video Length
+        video_length = get_length(video_path)
 
-    # Check if snippets are less than 5 seconds appart then concatenate, format 00:00:00
-    video_hate_snippets_concat = []
-    for i in range(len(video_hate_snippets)):
-        if i == 0:
-            video_hate_snippets_concat.append(video_hate_snippets[i])
-        else:
-            if video_hate_snippets_seconds[i][0] - video_hate_snippets_seconds[i-1][1] < 5:
-                video_hate_snippets_concat[-1][1] = video_hate_snippets[i][1]
+        # Get a Random Number of Snippets
+        num_snippets = np.random.randint(1, 3)
+
+        # Get Random Non-Hateful Snippets
+        video_snippets = []
+        for i in range(num_snippets):
+            end = np.random.randint(min_time, video_length)
+            start = np.random.randint(0, end - min_time)
+            video_snippets.append([start, end])
+
+        # Convert seconds to time format
+        video_snippets = [[f"{int(start//3600):02}:{int((start%3600)//60):02}:{int(start%60):02}",
+                           f"{int(end//3600):02}:{int((end%3600)//60):02}:{int(end%60):02}"] for start, end in video_snippets]
+
+    else:
+        # Get Hateful Snippets
+        video_snippets = eval(annotations[annotations['video_file_name'] == video_name]['hate_snippet'].values[0])
+        video_snippets_seconds = [[sum(x*int(t) for x, t in zip([3600, 60, 1], time.split(':'))) for time in hate_snippets] 
+                                  for hate_snippets in video_snippets] # Convert to seconds
+
+        # Check if snippets are less than 5 seconds appart then concatenate
+        video_snippets_concat = []
+        for i in range(len(video_snippets)):
+            if i == 0:
+                video_snippets_concat.append(video_snippets[i])
             else:
-                video_hate_snippets_concat.append(video_hate_snippets[i])
+                if video_snippets_seconds[i][0] - video_snippets_seconds[i-1][1] < 5:
+                    video_snippets_concat[-1][1] = video_snippets[i][1]
+                else:
+                    video_snippets_concat.append(video_snippets[i])
+        video_snippets = video_snippets_concat
           
     # Create directory to save video snippet as mp4
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    # Extract each hate snippet
-    for i in range(len(video_hate_snippets)):
-        start = video_hate_snippets[i][0]
-        end = video_hate_snippets[i][1]
+    # Extract each snippet
+    for i in range(len(video_snippets)):
+        start = video_snippets[i][0]
+        end = video_snippets[i][1]
         output_path = os.path.join(output_dir, f"{video_name.split('.')[0]}_snippet_{i}.mp4")
-        extract_hate_snippet(video_path, start, end, output_path)
+        extract_snippet(video_path, start, end, output_path)
