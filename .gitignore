@@ -173,6 +173,9 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# Data
+# Data files
+*.mp3
 *.mp4
+*.txt
+*.jpg
 

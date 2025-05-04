@@ -2,9 +2,10 @@ import os
 import subprocess
 from pathlib import Path
 import numpy as np
+import pandas as pd
 
 
-def get_length(filename):
+def get_length(filename: str):
     """
     Get the length of a video file in seconds.
     Source: https://stackoverflow.com/questions/3844430/how-to-get-the-duration-of-a-video-in-python
@@ -45,7 +46,7 @@ def extract_snippet(video_path: Path, start: float, end: float, output_path: Pat
     subprocess.run(cmd, check=True)
 
 
-def process_video(video_path, annotations, output_dir, min_time=5):
+def process_video(video_path: str, annotations: pd.DataFrame, output_dir: str, min_time=5):
     """
     Creates hate snippets from a video based on the provided annotations.
     
@@ -104,3 +105,26 @@ def process_video(video_path, annotations, output_dir, min_time=5):
         end = video_snippets[i][1]
         output_path = os.path.join(output_dir, f"{video_name.split('.')[0]}_snippet_{i}.mp4")
         extract_snippet(video_path, start, end, output_path)
+
+
+def extract_frames(input_path: str, output_dir: str, fps: int = 1):
+    """
+    Extracts frames from a video file and saves them as JPEG images.
+
+    Parameters:
+    - input_path: str, path to the input video file
+    - output_dir: str, directory to save the extracted frames
+    - fps: int, frames per second to extract (default is 1)
+    """
+
+    os.makedirs(output_dir, exist_ok=True)
+    cmd = [
+        "ffmpeg",
+        "-i", input_path,         
+        "-vf", f"fps={fps}",
+        "-q:v", "2",              # output quality (for JPEG 2)
+        os.path.join(output_dir, "frame_%04d.jpg"),
+        "-loglevel", "error",
+        "-hide_banner",
+    ]
+    subprocess.run(cmd, check=True)
