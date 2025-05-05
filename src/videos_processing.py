@@ -69,9 +69,15 @@ def process_video(video_path: str, annotations: pd.DataFrame, output_dir: str, m
         # Get Random Non-Hateful Snippets
         video_snippets = []
         for i in range(num_snippets):
-            end = np.random.randint(min_time, video_length)
-            start = np.random.randint(0, end - min_time)
-            video_snippets.append([start, end])
+            video_length = int(video_length)
+            
+            # if video is too short, just take the whole video
+            if video_length <= min_time:
+                video_snippets.append([0, video_length])
+            else:
+                start = np.random.randint(0, video_length - min_time)
+                end   = np.random.randint(start + min_time, video_length + 1)
+                video_snippets.append([start, end])
 
         # Convert seconds to time format
         video_snippets = [[f"{int(start//3600):02}:{int((start%3600)//60):02}:{int(start%60):02}",
@@ -80,9 +86,9 @@ def process_video(video_path: str, annotations: pd.DataFrame, output_dir: str, m
     else:
         # Get Hateful Snippets
         video_snippets = eval(annotations[annotations['video_file_name'] == video_name]['hate_snippet'].values[0])
-        video_snippets_seconds = [[sum(x*int(t) for x, t in zip([3600, 60, 1], time.split(':'))) for time in hate_snippets] 
-                                  for hate_snippets in video_snippets] # Convert to seconds
-
+        video_snippets_seconds = [[sum(x*int(t) for x, t in zip([3600, 60, 1], time.split(':'))) for time in sorted(hate_snippets)] 
+                                  for hate_snippets in sorted(video_snippets)] # Convert to seconds
+        
         # Check if snippets are less than 5 seconds appart then concatenate
         video_snippets_concat = []
         for i in range(len(video_snippets)):
@@ -100,9 +106,11 @@ def process_video(video_path: str, annotations: pd.DataFrame, output_dir: str, m
         os.makedirs(output_dir)
     
     # Extract each snippet
-    for i in range(len(video_snippets)):
+    for i in range(len(video_snippets)): # se qui uso seconds e poi riconverto in stringa di tempo?
         start = video_snippets[i][0]
         end = video_snippets[i][1]
+        if start > end: # lexographic comparison works because it's in hh:mm:ss format
+            start, end = end, start # flip them back
         output_path = os.path.join(output_dir, f"{video_name.split('.')[0]}_snippet_{i}.mp4")
         extract_snippet(video_path, start, end, output_path)
 
