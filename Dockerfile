@@ -39,6 +39,9 @@ RUN chown -R ${LDAP_USERNAME}:${LDAP_GROUPNAME} /home/${LDAP_USERNAME}
 RUN apt update
 RUN apt install python3-pip -y
 
+# adding ffmpeg for video processing
+RUN apt install ffmpeg -y
+
 # Set the working directory in your user's home
 WORKDIR /home/${LDAP_USERNAME}
 USER ${LDAP_USERNAME}
@@ -46,4 +49,3 @@ USER ${LDAP_USERNAME}
 
 # Install additional dependencies
 RUN pip install -r requirements.txt
-
