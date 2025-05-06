@@ -174,8 +174,7 @@ cython_debug/
 .pypirc
 
 # Data files
-*.mp3
-*.mp4
-*.txt
-*.jpg
-
+data/**/*.mp3
+data/**/*.mp4
+data/**/*.txt
+data/**/*.jpg
