@@ -16,12 +16,12 @@ def extract_audio_from_video(video_path: str, audio_path: str):
     - audio_path: str, path to save the output audio
     """
     # Check if the output file already exists then skip
-    if os.path.exists(audio_path):
+    if os.path.exists(str(audio_path)):
         logger.info(f"Audio already extracted from {video_path} to {audio_path}")
         return
     else:
         try:
-            extract_audio(video_path, audio_path)
+            extract_audio(str(video_path), str(audio_path))
             logger.info(f"Extracted audio from {video_path} to {audio_path}")
         except Exception as e:
             if "does not contain any stream" in str(e):
