@@ -2,7 +2,7 @@
 Final mini-project for EE-559 course at EPFL (Spring 2025)
 
 
-### Repo structure
+## Repo structure
 ```
 project-root/
 ├── data/                            # All datasets (not committed to Git)
@@ -37,4 +37,18 @@ project-root/
 
 ```
 
-### How to reproduce
+## How to reproduce
+
+1. **Downloading Data**
+    
+    First, download the data from the source using the provided script. This will download the original data used for the project and create the required directory structure to store the raw and processed data.
+    ```bash
+    ./data_download.sh
+    ```
+
+2. **Preprocessing Data**
+
+    Next, run the following command to preprocess the data. This will extract audio, video, text and image frames from the raw data and save them in the `data/clean` directory.
+    ```bash
+    python3 -m src.data_preprocessing
+    ```
