@@ -50,5 +50,19 @@ project-root/
 
     Next, run the following command to preprocess the data. This will extract audio, video, text and image frames from the raw data and save them in the `data/clean` directory.
     ```bash
-    python3 -m src.data_preprocessing
+    python3 -m scripts.data_preprocessing --steps all --model base --seed 42
     ```
+
+    Arguments:
+    
+    - `--steps`: One or more pipeline stages to run. Options:
+        - `snippets` – extract video snippets
+        - `audio` – extract audio from video snippets
+        - `text` – transcribe audio with Whisper
+        - `frames` – extract frames from video snippets
+        - `all` – run the entire pipeline (default)
+    - `--model`: (Optional) Whisper model to use. Choose from: `tiny`, `base`, `small`, `medium`, `large`
+    - `--seed`: (Optional) Random seed for reproducibility (default: `42`)
+    - `--overwrite`: (Optional) If passed, will overwrite existing files instead of skipping them
+
+    Make sure to run this command from the **project root**, not from inside the `scripts/` folder.
