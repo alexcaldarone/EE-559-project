@@ -1,62 +1,49 @@
-from transformers import CLIPProcessor, CLIPModel
-from sklearn.model_selection import train_test_split
-from torch.utils.data import Dataset, DataLoader
+from transformers import CLIPProcessor, CLIPModel # check if this works actually
+import os
+from PIL import Image
+from torch.utils.data import Dataset
 
-# Load the CLIP model and processor
+# Load the CLIP model and processor (evaluate whether to keep this here)
 model_name = "openai/clip-vit-base-patch32"
 clip_model = CLIPModel.from_pretrained(model_name)
 clip_processor = CLIPProcessor.from_pretrained(model_name)
 
-# Prepare a simple dataset class
-class VideoDataset(Dataset):
-    def __init__(self, image_folder, text_file, label, clip_processor):
-        self.image_folder = image_folder
-        self.text_file = text_file
-        self.label = label
-        self.clip_processor = clip_processor
-        self.images = self.load_images(image_folder)
-        self.text = self.load_text(text_file)
-    
-    def load_images(self, folder):
-        # Load all images from the folder
-        image_files = sorted([f for f in os.listdir(folder) if f.endswith(('.png', '.jpg', '.jpeg'))])
-        image_paths = [os.path.join(folder, file) for file in image_files]
-        images = [Image.open(path) for path in image_paths]
-        return images
-    
-    def load_text(self, text_file):
-        # Load text (transcript) from the text file
-        with open(text_file, 'r') as file:
-            text = file.read().strip()
-        return text
-    
+class VideoFrameTextDataset(Dataset):
+    def __init__(self, dataframe, root_dir, preprocess, tokenizer):
+        """
+        dataframe: pandas DataFrame with columns ['video_id', 'text', 'label']
+        root_dir: directory where video frame folders are stored (e.g., root/video_001/frame_001.jpg)
+        preprocess: CLIP image transform
+        tokenizer: CLIP tokenizer
+        """
+        self.df = dataframe
+        self.root_dir = root_dir
+        self.preprocess = preprocess
+        self.tokenizer = tokenizer
+
     def __len__(self):
-        # Return the number of images (frames)
-        return len(self.images)
-    
+        return len(self.df)
+
     def __getitem__(self, idx):
-        # Get the image and corresponding text for this index
-        image = self.images[idx]
-        text = self.text
-        
-        # Process the image and text to get embeddings
-        inputs = self.clip_processor(text=text, images=image, return_tensors="pt", padding=True)
-        
-        # Get the embeddings from the CLIP model
-        image_embedding = clip_model.get_image_features(**inputs)
-        text_embedding = clip_model.get_text_features(**inputs)
-        
-        # Flatten the embeddings into a vector
-        return image_embedding.squeeze(0), text_embedding.squeeze(0), torch.tensor(self.label, dtype=torch.float)
+        video_id, text, label = self.df.iloc[idx][['video_id', 'text', 'label']] # we need to see if this holds in the HateMMAnnotation
+        video_folder = os.path.join(self.root_dir, video_id) # change this to actual video directory
+        frame_files = sorted([
+            os.path.join(video_folder, fname) # change this aswell because its a different folder
+            for fname in os.listdir(video_folder)
+            if fname.endswith((".jpg", ".png"))
+        ])
 
-# Function to prepare data from folder and text file
-def prepare_data(image_folder, text_file, label):
-    dataset = VideoDataset(image_folder, text_file, label, clip_processor)
-    dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
-    return dataloader
+        # Load and transform all frames
+        frames = [self.preprocess(Image.open(f).convert("RGB")) for f in frame_files] # ok, but check if it works
+        frames_tensor = torch.stack(frames)  # shape: [num_frames, 3, H, W]
 
-# Assuming you have a list of images and corresponding text transcripts
-# images = [Image.open(image_path) for image_path in image_paths]  # load your images
-# texts = ["some text"] * len(images)  # your text data (transcripts)
-# labels = [1, 0, 1, 0]  # binary labels (0 or 1)
-
+        # Tokenize once, shared across all frames
+        text_token = self.tokenizer([text], truncate=True)[0]  # shape: [token_length]
+        
+        return frames_tensor, text_token, label
+    
+# to determine variable batch size based on video length
+def video_batcher(batch):
+    # Each element is (frames_tensor, text_token, label)
+    frames, texts, labels = zip(*batch)
+    return frames, texts, torch.tensor(labels)
