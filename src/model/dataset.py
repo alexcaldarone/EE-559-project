@@ -1,4 +1,4 @@
-from transformers import CLIPProcessor, CLIPModel # check if this works actually
+from transformers import CLIPProcessor, CLIPModel, CLIPTokenizer
 import os
 from PIL import Image
 import torch
@@ -13,34 +13,37 @@ CLEAN_DATA = PROJECT_ROOT / "data/clean"
 model_name = "openai/clip-vit-base-patch32"
 clip_model = CLIPModel.from_pretrained(model_name)
 clip_processor = CLIPProcessor.from_pretrained(model_name)
+clip_tokenizer = CLIPTokenizer.from_pretrained(model_name)
 
 class VideoFrameTextDataset(Dataset):
-    def __init__(self, video_id, preprocess, tokenizer, root_dir=CLEAN_DATA):
+    def __init__(self, video_ids, preprocess, tokenizer, root_dir=CLEAN_DATA):
         """
         video_id: unique identifier for each video e.g. 'hate_video_1_snippet_0'
         root_dir: directory where video frame folders are stored (by default ../data/clean)
         preprocess: CLIP image transform
         tokenizer: CLIP tokenizer
         """
-        self.video_id = video_id
+        self.video_ids = video_ids
         self.root_dir = str(root_dir)
         self.preprocess = preprocess
         self.tokenizer = tokenizer
 
     def __len__(self):
-        return len(self.df)
+        return len(self.video_ids)
 
     def __getitem__(self, idx):
-        video_label = 'non-hateful' if 'non_hate' in self.video_id else 'hateful'
+        video_label = 'non-hateful' if 'non_hate' in self.video_ids[idx] else 'hateful'
 
-        video_folder = os.path.join(self.root_dir, f'/frames/{video_label}/{self.video_id}') 
+        video_folder = os.path.join(self.root_dir, f'/frames/{video_label}/{self.video_ids[idx]}') 
+        print(self.root_dir)
+        print(self.video_folder)
         frame_files = sorted([
             os.path.join(video_folder, fname)
             for fname in os.listdir(video_folder)
             if fname.endswith((".jpg", ".png"))
         ])
 
-        with open(os.path.join(self.root_dir, f'/texts/{video_label}/{self.video_id}.txt'), 'r') as f:
+        with open(os.path.join(self.root_dir, f'/texts/{video_label}/{self.video_ids[idx]}.txt'), 'r') as f:
             text = f.read().strip()
 
         # Load and transform all frames
@@ -60,7 +63,7 @@ def video_batcher(batch):
 
 if __name__ == "__main__":
     # Example usage
-    dataset = VideoFrameTextDataset(video_id='hate_video_1_snippet_0', preprocess=clip_processor, tokenizer=clip_model.tokenizer)
+    dataset = VideoFrameTextDataset(video_ids=['hate_video_1_snippet_0'], preprocess=clip_processor, tokenizer=clip_tokenizer)
     dataloader = DataLoader(dataset, batch_size=1, collate_fn=video_batcher)
 
     for frames, texts, labels in dataloader:
