@@ -48,21 +48,27 @@ class VideoFrameTextDataset(Dataset):
         with open(self.root_dir + f'/texts/{video_label}/{self.video_ids[idx]}.txt', 'r') as f:
             text = f.read().strip()
 
+        video_label = 1 if video_label == 'hateful' else 0
+
         # Chunk the text into blocks of 50 words and tokenize
         text = text.split()
-        text = [' '.join(text[i:i + 50]) for i in range(0, len(text), 50)]
-        text = [self.tokenizer(text_chunk, return_tensors="pt", padding=True).to(DEVICE) for text_chunk in text]
+        text = [' '.join(text[i:i + min(50,len(text))]) for i in range(0, len(text), 50)]
+        # dont neeed this 
+        #text = [self.tokenizer(text_chunk, return_tensors="pt", padding=True).to(DEVICE) for text_chunk in text]
         
+        print(len(text))
+
         # Load and transform all frames
         frames = [Image.open(f).convert("RGB") for f in frame_files]
 
         inputs = [self.preprocess(
-            text=text,
+            text= text,
             images=frame,
             return_tensors="pt",
             padding=True).to(DEVICE) for frame in frames]
 
         with torch.no_grad():
+            # need to find better presentation for this -> right now we are treating the sliced text as independent inputs   
             outputs = [clip_model(**input) for input in inputs]
 
         image_embeddings = torch.stack([output.image_embeds for output in outputs])
@@ -82,4 +88,7 @@ if __name__ == "__main__":
     dataloader = DataLoader(dataset, batch_size=1, collate_fn=video_batcher)
 
     for frames, texts, labels in dataloader:
-        print(f"Frames: {frames}, Texts: {texts}, Labels: {labels}")
+        print(f"Frames: {type(frames)}, Texts: {type(texts)}, Labels: {labels.dim()}")
+        print(f"Frames shape: {frames[0].shape}, Texts shape: {texts[0].shape}")
+
+    
