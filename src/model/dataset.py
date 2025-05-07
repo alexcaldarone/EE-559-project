@@ -1,9 +1,10 @@
 from transformers import CLIPProcessor, CLIPModel # check if this works actually
 import os
 from PIL import Image
-from torch.utils.data import Dataset
-from pathlib import Path
 import torch
+from torch.utils.data import Dataset, DataLoader
+from pathlib import Path
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CLEAN_DATA = PROJECT_ROOT / "data/clean"
@@ -56,3 +57,11 @@ def video_batcher(batch):
     # Each element is (frames_tensor, text_token, label)
     frames, texts, labels = zip(*batch)
     return frames, texts, torch.tensor(labels)
+
+if __name__ == "__main__":
+    # Example usage
+    dataset = VideoFrameTextDataset(video_id='hate_video_1_snippet_0', preprocess=clip_processor, tokenizer=clip_model.tokenizer)
+    dataloader = DataLoader(dataset, batch_size=1, collate_fn=video_batcher)
+
+    for frames, texts, labels in dataloader:
+        print(f"Frames: {frames}, Texts: {texts}, Labels: {labels}")
