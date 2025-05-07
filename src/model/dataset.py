@@ -2,6 +2,11 @@ from transformers import CLIPProcessor, CLIPModel # check if this works actually
 import os
 from PIL import Image
 from torch.utils.data import Dataset
+from pathlib import Path
+import torch
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CLEAN_DATA = PROJECT_ROOT / "data/clean"
 
 # Load the CLIP model and processor (evaluate whether to keep this here)
 model_name = "openai/clip-vit-base-patch32"
@@ -9,15 +14,15 @@ clip_model = CLIPModel.from_pretrained(model_name)
 clip_processor = CLIPProcessor.from_pretrained(model_name)
 
 class VideoFrameTextDataset(Dataset):
-    def __init__(self, dataframe, root_dir, preprocess, tokenizer):
+    def __init__(self, video_id, preprocess, tokenizer, root_dir=CLEAN_DATA):
         """
-        dataframe: pandas DataFrame with columns ['video_id', 'text', 'label']
-        root_dir: directory where video frame folders are stored (e.g., root/video_001/frame_001.jpg)
+        video_id: unique identifier for each video e.g. 'hate_video_1_snippet_0'
+        root_dir: directory where video frame folders are stored (by default ../data/clean)
         preprocess: CLIP image transform
         tokenizer: CLIP tokenizer
         """
-        self.df = dataframe
-        self.root_dir = root_dir
+        self.video_id = video_id
+        self.root_dir = str(root_dir)
         self.preprocess = preprocess
         self.tokenizer = tokenizer
 
@@ -25,13 +30,17 @@ class VideoFrameTextDataset(Dataset):
         return len(self.df)
 
     def __getitem__(self, idx):
-        video_id, text, label = self.df.iloc[idx][['video_id', 'text', 'label']] # we need to see if this holds in the HateMMAnnotation
-        video_folder = os.path.join(self.root_dir, video_id) # change this to actual video directory
+        video_label = 'non-hateful' if 'non_hate' in self.video_id else 'hateful'
+
+        video_folder = os.path.join(self.root_dir, f'/frames/{video_label}/{self.video_id}') 
         frame_files = sorted([
-            os.path.join(video_folder, fname) # change this aswell because its a different folder
+            os.path.join(video_folder, fname)
             for fname in os.listdir(video_folder)
             if fname.endswith((".jpg", ".png"))
         ])
+
+        with open(os.path.join(self.root_dir, f'/texts/{video_label}/{self.video_id}.txt'), 'r') as f:
+            text = f.read().strip()
 
         # Load and transform all frames
         frames = [self.preprocess(Image.open(f).convert("RGB")) for f in frame_files] # ok, but check if it works
@@ -40,7 +49,7 @@ class VideoFrameTextDataset(Dataset):
         # Tokenize once, shared across all frames
         text_token = self.tokenizer([text], truncate=True)[0]  # shape: [token_length]
         
-        return frames_tensor, text_token, label
+        return frames_tensor, text_token, video_label
     
 # to determine variable batch size based on video length
 def video_batcher(batch):
