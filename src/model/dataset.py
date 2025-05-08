@@ -3,7 +3,6 @@ import os
 from PIL import Image
 import torch
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
 from pathlib import Path
 
 
@@ -12,14 +11,9 @@ CLEAN_DATA = PROJECT_ROOT / "data/clean"
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Load the CLIP model and processor (evaluate whether to keep this here)
-model_name = "openai/clip-vit-base-patch32"
-clip_model = CLIPModel.from_pretrained(model_name)
-clip_processor = CLIPProcessor.from_pretrained(model_name)
-clip_tokenizer = CLIPTokenizer.from_pretrained(model_name)
 
 class VideoFrameTextDataset(Dataset):
-    def __init__(self, video_ids, preprocess, tokenizer, root_dir=CLEAN_DATA):
+    def __init__(self, video_ids, preprocess, tokenizer, clip_model, root_dir=CLEAN_DATA):
         """
         video_id: unique identifier for each video e.g. 'hate_video_1_snippet_0'
         root_dir: directory where video frame folders are stored (by default ../data/clean)
@@ -30,65 +24,178 @@ class VideoFrameTextDataset(Dataset):
         self.root_dir = str(root_dir)
         self.preprocess = preprocess
         self.tokenizer = tokenizer
+        self.clip_model = clip_model
+
+        self.valid_video_ids = self._validate_video_ids()
+        self.empty_text_placeholder = "empty"
+
+    def _validate_video_ids(self):
+        """
+        Pre-check all video IDs to filter out ones with missing files.
+        Returns list of valid video IDs.
+        """
+        valid_ids = []
+        for video_id in self.video_ids:
+            try:
+                video_label = 'non-hateful' if 'non_hate' in video_id else 'hateful'
+                
+                # Check if video folder exists
+                video_folder = os.path.join(self.root_dir, f'frames/{video_label}/{video_id}/')
+                
+                # Check if text file exists
+                text_file = os.path.join(self.root_dir, f'texts/{video_label}/{video_id}.txt')
+                
+                if not os.path.exists(video_folder):
+                    print(f"Skipping {video_id}: Video folder not found at {video_folder}")
+                    continue
+                    
+                frame_files = [f for f in os.listdir(video_folder) 
+                              if f.endswith((".jpg", ".png"))]
+                if not frame_files:
+                    print(f"Skipping {video_id}: No frame files found in {video_folder}")
+                    continue
+                    
+                if not os.path.exists(text_file):
+                    print(f"Skipping {video_id}: Text file not found at {text_file}")
+                    continue
+                    
+                # All checks passed, this is a valid video ID
+                valid_ids.append(video_id)
+                
+            except Exception as e:
+                print(f"Error validating {video_id}: {str(e)}")
+                continue
+                
+        return valid_ids
 
     def __len__(self):
-        return len(self.video_ids)
+        return len(self.valid_video_ids)
 
     def __getitem__(self, idx):
-        video_label = 'non-hateful' if 'non_hate' in self.video_ids[idx] else 'hateful'
+        video_id = self.valid_video_ids[idx]
+        video_label = 'non-hateful' if 'non_hate' in video_id else 'hateful'
 
-        video_folder = self.root_dir + f'/frames/{video_label}/{self.video_ids[idx]}/' 
-        frame_files = sorted([
-            os.path.join(video_folder, fname)
-            for fname in os.listdir(video_folder)
-            if fname.endswith((".jpg", ".png"))
-        ])
+        video_folder = self.root_dir + f'/frames/{video_label}/{video_id}/' 
+        try:
+            frame_files = sorted([
+                os.path.join(video_folder, fname)
+                for fname in os.listdir(video_folder)
+                if fname.endswith((".jpg", ".png"))
+            ])
+
+            if not frame_files:
+                raise FileNotFoundError(f"No frame files found for {video_id}")
+        except Exception as e:
+            return self.__geitem__((idx + 1) % len(self.valid_video_ids))
+
 
         # Load Text
-        with open(self.root_dir + f'/texts/{video_label}/{self.video_ids[idx]}.txt', 'r') as f:
-            text = f.read().strip()
+        text_file = self.root_dir + f'/texts/{video_label}/{video_id}.txt'
+        try:
+            with open(text_file, 'r') as f:
+                text = f.read().strip()
 
+            #print("text before preprocessing", text)
+            if not text:
+                print(f"Warning: Empty text for {video_id}, using placeholder.")
+                text = self.empty_text_placeholder
+        except Exception as e:
+            #print(f"Error loading text for {video_id}: {str(e)}")
+            text = self.empty_text_placeholder
+        
         video_label = 1 if video_label == 'hateful' else 0
 
         # Chunk the text into blocks of 50 words and tokenize
         text = text.split()
-        text = [' '.join(text[i:i + min(50,len(text))]) for i in range(0, len(text), 50)]
+        # is there a way i can dinamically chunk text here?
+        text = [' '.join(text[i:i + min(30,len(text))]) for i in range(0, len(text), 30)]
         # dont neeed this 
         #text = [self.tokenizer(text_chunk, return_tensors="pt", padding=True).to(DEVICE) for text_chunk in text]
         
         print(len(text))
+        print("text", text)
 
         # Load and transform all frames
-        frames = [Image.open(f).convert("RGB") for f in frame_files]
+        try:
+            # Load and transform all frames
+            frames = []
+            for f in frame_files:
+                try:
+                    img = Image.open(f).convert("RGB")
+                    frames.append(img)
+                except Exception as e:
+                    print(f"Error loading image {f}: {str(e)}")
+                    # Skip bad frames
+                    continue
+            
+            # Make sure we have at least one frame
+            if not frames:
+                raise ValueError("No valid frames loaded")
+            
+            inputs = []
+            for frame in frames:
+                try:
+                    processed = self.preprocess(
+                        text=text,
+                        images=frame,
+                        return_tensors="pt",
+                        padding=True).to(DEVICE)
+                    inputs.append(processed)
+                except Exception as e:
+                    print(f"Error preprocessing: {str(e)}")
+                    continue
+            
+            # Make sure we have at least one valid input
+            if not inputs:
+                raise ValueError("No valid inputs created after preprocessing")
+                
+            with torch.no_grad():
+                outputs = []
+                for input_item in inputs:
+                    try:
+                        output = self.clip_model(**input_item)
+                        outputs.append(output)
+                    except Exception as e:
+                        print(f"Error in model forward pass: {str(e)}")
+                        continue
+            
+            if not outputs:
+                raise ValueError("No valid outputs from model")
+                
+            # Extract embeddings
+            image_embeddings = torch.stack([output.image_embeds for output in outputs])
+            
+            # Safe mean operation - handle potential empty tensors
+            text_embedding = torch.stack([
+                output.text_embeds.mean(dim=0, keepdim=True) 
+                if output.text_embeds.size(0) > 0 
+                else torch.zeros_like(output.text_embeds[0]).unsqueeze(0) 
+                for output in outputs
+            ])
+            
+            video_label_tensor = torch.full((len(outputs), 1), video_label, dtype=torch.float)
+            
+            return image_embeddings, text_embedding, video_label_tensor
+            
+        except Exception as e:
+            print(f"Fatal error processing {video_id}: {str(e)}")
+            # Return a different valid video as fallback
+            return self.__getitem__((idx + 1) % len(self.valid_video_ids))
 
-        inputs = [self.preprocess(
-            text= text,
-            images=frame,
-            return_tensors="pt",
-            padding=True).to(DEVICE) for frame in frames]
 
-        with torch.no_grad():
-            # need to find better presentation for this -> right now we are treating the sliced text as independent inputs   
-            outputs = [clip_model(**input) for input in inputs]
-
-        image_embeddings = torch.stack([output.image_embeds for output in outputs])
-        text_embedding = torch.stack([output.text_embeds for output in outputs]) 
-
-        return image_embeddings, text_embedding, video_label
-    
 # to determine variable batch size based on video length
 def video_batcher(batch):
-    # Each element is (frames_tensor, text_token, label)
-    frames, texts, labels = zip(*batch)
-    return frames, texts, torch.tensor(labels)
-
-if __name__ == "__main__":
-    # Example usage
-    dataset = VideoFrameTextDataset(video_ids=['hate_video_1_snippet_0'], preprocess=clip_processor, tokenizer=clip_tokenizer)
-    dataloader = DataLoader(dataset, batch_size=1, collate_fn=video_batcher)
-
-    for frames, texts, labels in dataloader:
-        print(f"Frames: {type(frames)}, Texts: {type(texts)}, Labels: {labels.dim()}")
-        print(f"Frames shape: {frames[0].shape}, Texts shape: {texts[0].shape}")
-
+        # Each element is (frames_tensor, text_token, label)
+    # Filter out any None values in case an item failed
+    valid_batch = [item for item in batch if item is not None]
     
+    if not valid_batch:
+        # Create an empty batch with appropriate dimensions
+        # You'll need to define appropriate dimensions based on your model
+        empty_frames = torch.zeros((0, 512))  # Adjust dimensions as needed
+        empty_text = torch.zeros((0, 512))  # Adjust dimensions as needed
+        empty_labels = torch.zeros((0, 1))
+        return empty_frames, empty_text, empty_labels
+    
+    frames, texts, labels = zip(*valid_batch)
+    return frames, texts, torch.cat(labels, dim=0)
