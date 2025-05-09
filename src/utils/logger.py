@@ -7,7 +7,7 @@ def setup_logger(name: str, log_dir: str = "logs") -> logging.Logger:
     log_path = os.path.join(log_dir, f"{name}.log")
 
     logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.ERROR)
 
     # Avoid duplicate logs in case of multiple imports
     if not logger.handlers:
