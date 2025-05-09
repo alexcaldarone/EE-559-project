@@ -112,8 +112,8 @@ class VideoFrameTextDataset(Dataset):
         # dont neeed this 
         #text = [self.tokenizer(text_chunk, return_tensors="pt", padding=True).to(DEVICE) for text_chunk in text]
         
-        print(len(text))
-        print("text", text)
+        #print(len(text))
+        #print("text", text)
 
         # Load and transform all frames
         try:
@@ -185,7 +185,7 @@ class VideoFrameTextDataset(Dataset):
 
 # to determine variable batch size based on video length
 def video_batcher(batch):
-        # Each element is (frames_tensor, text_token, label)
+    # Each element is (frames_tensor, text_token, label)
     # Filter out any None values in case an item failed
     valid_batch = [item for item in batch if item is not None]
     
