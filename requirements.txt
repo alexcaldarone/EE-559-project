@@ -3,3 +3,5 @@ pandas
 tqdm
 audio-extract
 openai-whisper
+transformers
+tensorboard
