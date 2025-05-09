@@ -9,11 +9,20 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CLEAN_DATA = PROJECT_ROOT / "data/clean"
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class VideoFrameTextDataset(Dataset):
-    def __init__(self, video_ids, preprocess, tokenizer, clip_model, root_dir=CLEAN_DATA):
+    def __init__(
+            self, 
+            video_ids, 
+            preprocess, 
+            tokenizer, 
+            clip_model,
+            logger,
+            device,
+            root_dir=CLEAN_DATA
+        ):
         """
         video_id: unique identifier for each video e.g. 'hate_video_1_snippet_0'
         root_dir: directory where video frame folders are stored (by default ../data/clean)
@@ -25,6 +34,9 @@ class VideoFrameTextDataset(Dataset):
         self.preprocess = preprocess
         self.tokenizer = tokenizer
         self.clip_model = clip_model
+
+        self.logger = logger
+        self.device = device
 
         self.valid_video_ids = self._validate_video_ids()
         self.empty_text_placeholder = "empty"
@@ -46,17 +58,17 @@ class VideoFrameTextDataset(Dataset):
                 text_file = os.path.join(self.root_dir, f'texts/{video_label}/{video_id}.txt')
                 
                 if not os.path.exists(video_folder):
-                    print(f"Skipping {video_id}: Video folder not found at {video_folder}")
+                    self.logger.warning(f"Skipping {video_id}: folder not found: {video_folder}")
                     continue
                     
                 frame_files = [f for f in os.listdir(video_folder) 
                               if f.endswith((".jpg", ".png"))]
                 if not frame_files:
-                    print(f"Skipping {video_id}: No frame files found in {video_folder}")
+                    self.logger.warning(f"Skipping {video_id}: no frame files in {video_folder}")
                     continue
                     
                 if not os.path.exists(text_file):
-                    print(f"Skipping {video_id}: Text file not found at {text_file}")
+                    self.logger.warning(f"Skipping {video_id}: text file not found: {text_file}")
                     continue
                     
                 # All checks passed, this is a valid video ID
@@ -97,7 +109,7 @@ class VideoFrameTextDataset(Dataset):
 
             #print("text before preprocessing", text)
             if not text:
-                print(f"Warning: Empty text for {video_id}, using placeholder.")
+                self.logger.warning(f"Warning: Empty text for {video_id}, using placeholder.")
                 text = self.empty_text_placeholder
         except Exception as e:
             #print(f"Error loading text for {video_id}: {str(e)}")
@@ -124,7 +136,7 @@ class VideoFrameTextDataset(Dataset):
                     img = Image.open(f).convert("RGB")
                     frames.append(img)
                 except Exception as e:
-                    print(f"Error loading image {f}: {str(e)}")
+                    self.logger.warning(f"Error loading image {f}: {str(e)}")
                     # Skip bad frames
                     continue
             
@@ -139,10 +151,10 @@ class VideoFrameTextDataset(Dataset):
                         text=text,
                         images=frame,
                         return_tensors="pt",
-                        padding=True).to(DEVICE)
+                        padding=True).to(self.device)
                     inputs.append(processed)
                 except Exception as e:
-                    print(f"Error preprocessing: {str(e)}")
+                    self.logger.warning(f"Error preprocessing: {str(e)}")
                     continue
             
             # Make sure we have at least one valid input
@@ -156,7 +168,7 @@ class VideoFrameTextDataset(Dataset):
                         output = self.clip_model(**input_item)
                         outputs.append(output)
                     except Exception as e:
-                        print(f"Error in model forward pass: {str(e)}")
+                        self.logger.warning(f"Error in model forward pass: {str(e)}")
                         continue
             
             if not outputs:

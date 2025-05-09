@@ -5,6 +5,7 @@ import yaml
 import random
 from datetime import datetime
 
+import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -12,7 +13,10 @@ from transformers import CLIPModel, CLIPProcessor, CLIPTokenizer
 
 from src.model.models import BinaryClassifier, MultiModalClassifier
 from src.model.dataset import VideoFrameTextDataset, video_batcher
+from src.utils.logger import setup_logger
 
+
+logger = setup_logger(f"training_{datetime.now().strftime('%Y%m%d_%H%M')}")
 
 # paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -73,7 +77,7 @@ def train_and_evaluate(config, model_name):
     train_config = config['train_hyperparams']
     model_config = config['models'][model_name]
 
-    log_dir = Path("logs") / model_name
+    log_dir = Path("logs") / model_name / datetime.now().strftime("%Y%m%d_%H%M%S")
     log_dir.mkdir(parents=True, exist_ok=True)
     writer = SummaryWriter(log_dir=str(log_dir))
 
@@ -91,10 +95,20 @@ def train_and_evaluate(config, model_name):
     clip_tokenizer = CLIPTokenizer.from_pretrained(config['clip']['model_name'])
     clip_model.eval()
 
-    train_dataset = VideoFrameTextDataset(train_ids, preprocess=clip_processor,
-                                          tokenizer=clip_tokenizer, clip_model=clip_model)
-    test_dataset = VideoFrameTextDataset(test_ids, preprocess=clip_processor,
-                                         tokenizer=clip_tokenizer, clip_model=clip_model)
+    train_dataset = VideoFrameTextDataset(
+        train_ids, 
+        preprocess=clip_processor,
+        tokenizer=clip_tokenizer, 
+        clip_model=clip_model,
+        logger=logger,
+        device=device)
+    test_dataset = VideoFrameTextDataset(
+        test_ids, 
+        preprocess=clip_processor,
+        tokenizer=clip_tokenizer,
+        clip_model=clip_model,
+        logger=logger,
+        device=device)
 
     train_loader = DataLoader(train_dataset, batch_size=train_config['batch_size'],
                               shuffle=True, collate_fn=video_batcher)
@@ -109,8 +123,19 @@ def train_and_evaluate(config, model_name):
         transformer_hidden_dim=model_config['hidden_dim']
     ).to(device)
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=float(train_config['lr']))
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(train_config['lr']),
+        weight_decay=float(train_config.get('weight_decay', 0.0))
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=train_config['epochs'],
+        eta_min=0.0
+    )
     criterion = torch.nn.CrossEntropyLoss()
+
+    history = []
 
     for epoch in range(train_config['epochs']):
         model.train()
@@ -122,7 +147,7 @@ def train_and_evaluate(config, model_name):
             labels = labels.to(device).long()
             if labels.ndim == 0:
                 labels = labels.unsqueeze(0)
-
+            
             logits = model(frames, text)
             labels = labels.view(-1)
             loss = criterion(logits, labels)
@@ -135,6 +160,8 @@ def train_and_evaluate(config, model_name):
             total_correct += (preds == labels).sum().item()
             total_loss += loss.item()
             total_samples += labels.size(0)
+        
+        scheduler.step()
 
         avg_train_loss = total_loss / len(train_loader)
         train_accuracy = total_correct / total_samples
@@ -146,18 +173,35 @@ def train_and_evaluate(config, model_name):
         writer.add_scalar("Loss/test", test_loss, epoch)
         writer.add_scalar("Accuracy/test", test_accuracy, epoch)
 
-        print(f"Epoch {epoch+1}: Train Loss={avg_train_loss:.4f}, Train Acc={train_accuracy:.4f}, "
-              f"Test Loss={test_loss:.4f}, Test Acc={test_accuracy:.4f}")
+        logger.info(f"Epoch {epoch}/{train_config['epochs']} "
+                    f"Train Loss={avg_train_loss:.4f}, Train Acc={train_accuracy:.4f} | "
+                    f"Test Loss={test_loss:.4f}, Test Accurary={test_accuracy:.4f}")
+        
+        #print(f"Epoch {epoch+1}: Train Loss={avg_train_loss:.4f}, Train Acc={train_accuracy:.4f}, "
+        #      f"Test Loss={test_loss:.4f}, Test Acc={test_accuracy:.4f}")
+        
+        history.append({
+            'epoch': epoch,
+            'train_loss': avg_train_loss,
+            'train_acc': train_accuracy,
+            'val_loss': test_loss,
+            'val_acc': test_accuracy,
+            'lr': scheduler.get_last_lr()[0]
+        })
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     weights_path = PROJECT_ROOT / "models/checkpoints" / f"{model_name}_{timestamp}.pt"
     weights_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), weights_path)
-    print(f"Model saved to {weights_path}")
-
-    print("Final evaluation on test set:")
+    logger.info(f"Saved checkpoint to {weights_path}")
+    
     final_loss, final_accuracy = evaluate(model, test_loader, criterion, device)
-    print(f"Test Loss = {final_loss:.4f}, Test Accuracy = {final_accuracy:.4f}")
+    logger.info(f"Final evaluation on test set | Test Loss = {final_loss:.4f}, Test Accuracy = {final_accuracy:.4f}")
+
+    df = pd.DataFrame(history)
+    results_path = PROJECT_ROOT / "results" / f"{model_name}_{timestamp}.csv"
+    df.to_csv(results_path, index=False)
+    logger.info(f"Saved training history to {results_path}")
 
 if __name__ == "__main__":
     args = parse_args()
