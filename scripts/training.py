@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from transformers import CLIPModel, CLIPProcessor, CLIPTokenizer
 
-from src.model.models import BinaryClassifier, MultiModalClassifier
+from src.model.models import BinaryClassifier, MultiModalClassifier, CrossModalFusion
 from src.model.dataset import PrecomputedEmbeddingsDataset, video_batcher
 from src.utils.logger import setup_logger
 
@@ -25,6 +25,10 @@ CLEAN_DATA = PROJECT_ROOT / "data/clean"
 EMBEDDINGS_DIR = PROJECT_ROOT / "data/embeddings"
 
 #DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+LOSS_FUNCTION_DICT = {
+    "gelu": torch.nn.GELU
+}
 
 def load_config(config_path):
     with open(config_path, "r") as f:
@@ -61,7 +65,9 @@ def evaluate(model, dataloader, criterion, device):
                 labels = labels.unsqueeze(0)
 
             logits = model(frames, text)
-            labels = labels.view(-1)
+            #logits = logits.mean(dim = 0).unsqueeze(0)
+            #labels = labels.view(-1)
+            labels = torch.tile(labels, (logits.size(0), 1)).squeeze(1).long()
             loss = criterion(logits, labels)
 
             preds = logits.argmax(dim=1)
@@ -110,14 +116,24 @@ def train_and_evaluate(config, model_name):
         batch_size=1,
         shuffle=False,
         collate_fn=video_batcher)
-
-    model = MultiModalClassifier(
-        embed_dim=model_config['embed_dim'],
-        num_classes=model_config['num_classes'],
-        num_heads=model_config['num_heads'],
-        num_layers=model_config['num_layers'],
-        transformer_hidden_dim=model_config['hidden_dim']
-    ).to(device)
+    
+    if model_name == "MultiModalClassifier":
+        model = MultiModalClassifier(
+            embed_dim=model_config['embed_dim'],
+            num_classes=model_config['num_classes'],
+            num_heads=model_config['num_heads'],
+            num_layers=model_config['num_layers'],
+            transformer_hidden_dim=model_config['hidden_dim'],
+            classifier_hidden_dims=model_config["classifier_hidden_dims"],
+            dropout_rate=model_config["dropout_rate"],
+            activation_function=LOSS_FUNCTION_DICT[model_config["activation_function"]]
+        ).to(device)
+    elif model_name == "CrossModalFusion":
+        model = CrossModalFusion(
+            embed_dim=model_config["embed_dim"],
+            num_heads=model_config["num_heads"],
+            num_classes=2    
+        ).to(device)
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -138,15 +154,18 @@ def train_and_evaluate(config, model_name):
         total_loss, total_correct, total_samples = 0, 0, 0
 
         for frames_list, texts_list, labels in train_loader:
-            frames = frames_list[0].to(device)
+            frames = frames_list[0].to(device) # why index zero here?
             text = texts_list[0].to(device)
             labels = labels.to(device).long()
             if labels.ndim == 0:
                 labels = labels.unsqueeze(0)
             
             logits = model(frames, text)
-            logits = logits.mean(dim = 0).unsqueeze(0)
-            labels = labels.view(-1)
+            #logits = logits.mean(dim = 0).unsqueeze(0)
+            labels = torch.tile(labels, (logits.size(0), 1)).squeeze(1).long()
+            #print(f"logits shape: {logits.shape}, labels shape: {labels.shape}")
+            #print("logits", logits, logits.shape)
+            #print("labels", labels, labels.shape)
             loss = criterion(logits, labels)
 
             optimizer.zero_grad()
@@ -170,7 +189,7 @@ def train_and_evaluate(config, model_name):
         writer.add_scalar("Loss/test", test_loss, epoch)
         writer.add_scalar("Accuracy/test", test_accuracy, epoch)
 
-        logger.info(f"Epoch {epoch}/{train_config['epochs']} "
+        logger.info(f"Epoch {epoch+1}/{train_config['epochs']} "
                     f"Train Loss={avg_train_loss:.4f}, Train Acc={train_accuracy:.4f} | "
                     f"Test Loss={test_loss:.4f}, Test Accurary={test_accuracy:.4f}")
         
@@ -204,4 +223,4 @@ if __name__ == "__main__":
     args = parse_args()
     config = load_config(args.config)
 
-    train_and_evaluate(config, "MultiModalClassifier")
+    train_and_evaluate(config, args.model_name)
