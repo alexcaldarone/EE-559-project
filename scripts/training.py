@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 from transformers import CLIPModel, CLIPProcessor, CLIPTokenizer
 
 from src.model.models import BinaryClassifier, MultiModalClassifier
-from src.model.dataset import VideoFrameTextDataset, video_batcher
+from src.model.dataset import PrecomputedEmbeddingsDataset, video_batcher
 from src.utils.logger import setup_logger
 
 
@@ -22,6 +22,7 @@ logger = setup_logger(f"training_{datetime.now().strftime('%Y%m%d_%H%M')}")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_DATA = PROJECT_ROOT / "data/raw"
 CLEAN_DATA = PROJECT_ROOT / "data/clean"
+EMBEDDINGS_DIR = PROJECT_ROOT / "data/embeddings"
 
 #DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -89,31 +90,26 @@ def train_and_evaluate(config, model_name):
     split_idx = int(len(video_ids) * 0.8) 
     train_ids, test_ids = video_ids[:split_idx], video_ids[split_idx:]
 
-    # initialize clip model
-    clip_model = CLIPModel.from_pretrained(config['clip']['model_name']).to(device)
-    clip_processor = CLIPProcessor.from_pretrained(config['clip']['model_name'])
-    clip_tokenizer = CLIPTokenizer.from_pretrained(config['clip']['model_name'])
-    clip_model.eval()
+    train_dataset = PrecomputedEmbeddingsDataset(
+        embeddings_dir=EMBEDDINGS_DIR,
+        split=train_ids
+    )
+    test_dataset = PrecomputedEmbeddingsDataset(
+        embeddings_dir=EMBEDDINGS_DIR,
+        split=test_ids
+    )
 
-    train_dataset = VideoFrameTextDataset(
-        train_ids, 
-        preprocess=clip_processor,
-        tokenizer=clip_tokenizer, 
-        clip_model=clip_model,
-        logger=logger,
-        device=device)
-    test_dataset = VideoFrameTextDataset(
-        test_ids, 
-        preprocess=clip_processor,
-        tokenizer=clip_tokenizer,
-        clip_model=clip_model,
-        logger=logger,
-        device=device)
-
-    train_loader = DataLoader(train_dataset, batch_size=train_config['batch_size'],
-                              shuffle=True, collate_fn=video_batcher)
-    test_loader = DataLoader(test_dataset, batch_size=1,
-                             shuffle=False, collate_fn=video_batcher)
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=train_config['batch_size'],
+        shuffle=True, 
+        collate_fn=video_batcher
+    )
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=1,
+        shuffle=False,
+        collate_fn=video_batcher)
 
     model = MultiModalClassifier(
         embed_dim=model_config['embed_dim'],
@@ -149,6 +145,7 @@ def train_and_evaluate(config, model_name):
                 labels = labels.unsqueeze(0)
             
             logits = model(frames, text)
+            logits = logits.mean(dim = 0).unsqueeze(0)
             labels = labels.view(-1)
             loss = criterion(logits, labels)
 
