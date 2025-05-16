@@ -178,3 +178,4 @@ data/**/*.mp3
 data/**/*.mp4
 data/**/*.txt
 data/**/*.jpg
+data/**/*.pkl
