@@ -1,0 +1,24 @@
+# Seed for reproducibility
+seed: 34746
+# Frame augmentation configuration
+frame_augmentation:
+  # Whether to apply data augmentation
+  apply: true
+  # List of augmentations to apply
+  augmentations:
+    RandomCrop:
+      size: [400, 400]
+      padding: 4
+    RandomHorizontalFlip:
+      p: 0.5
+    ColorJitter:
+      brightness: 0.2
+      contrast: 0.2
+      saturation: 0.2
+      hue: 0.1
+    RandomRotation:
+      degrees: 15
+# Text augmentation configuration
+text_augmentation:
+  # Whether to mask text according to keywords
+  apply: true
