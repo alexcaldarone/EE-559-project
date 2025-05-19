@@ -1,0 +1,8 @@
+model: "openai/clip-vit-base-patch32"
+epochs: 3
+lr: 1e-5
+batch_size: 1
+seed: 42
+weight_decay: 1e-4
+train_split: 0.8
+early_stopping_patience: 2
