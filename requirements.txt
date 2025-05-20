@@ -5,3 +5,4 @@ audio-extract
 openai-whisper
 transformers
 tensorboard
+matplotlib
