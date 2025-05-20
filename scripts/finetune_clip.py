@@ -400,6 +400,8 @@ def extract_embeddings(config, device):
     processor = CLIPProcessor.from_pretrained(MODEL_CHECKPOINTS_DIR / 'clip-finetuned')
     model.eval()
 
+    index_data = []
+
     video_ids = get_video_ids(CLEAN_DATA)
     valid_video_ids = validate_video_ids(video_ids, CLEAN_DATA, logger)
     random.shuffle(valid_video_ids)
@@ -450,20 +452,30 @@ def extract_embeddings(config, device):
                         f"due to error in forward pass: {e}"
                     )
                     continue
+                    
             
             if image_embeddings:
                 image_embeddings = torch.stack(image_embeddings)
-            
+            if isinstance(image_embeddings, list) and len(image_embeddings) == 0:
+                continue
+            #print(type(image_embeddings))
+            #print(image_embeddings)
             data = {
                 'video_id': vids[0],
-                'image_embeddings': image_embeddings,
-                'text_embedding': text_embedding,
-                'label': labels
+                'image_embeddings': image_embeddings.cpu(),
+                'text_embedding': text_embedding.cpu(),
+                'label': labels.cpu()
             }
 
             output_file = os.path.join(FINETUNED_EMBEDDINGS_DIR, f"{vids[0]}.pkl")
+            index_data.append({'video_id': vids[0], 'label': labels, 'file': output_file})
             with open(output_file, "wb") as f:
                 pickle.dump(data, f)
+    
+    index_file = os.path.join(FINETUNED_EMBEDDINGS_DIR, "index.pkl")
+    with open(index_file, 'wb') as f:
+        pickle.dump(index_data, f)
+
 
 def main():
     parser = argparse.ArgumentParser("Finetune CLIP and extract embeddings")

@@ -18,7 +18,8 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
     average_precision_score,
-    confusion_matrix
+    confusion_matrix,
+    roc_curve
 )
 
 from src.model.models import BinaryClassifier, MultiModalClassifier, CrossModalFusion
@@ -32,7 +33,7 @@ logger = setup_logger(f"training_{datetime.now().strftime('%Y%m%d_%H%M')}")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_DATA = PROJECT_ROOT / "data/raw"
 CLEAN_DATA = PROJECT_ROOT / "data/clean"
-EMBEDDINGS_DIR = PROJECT_ROOT / "data/embeddings"
+EMBEDDINGS_DIR = PROJECT_ROOT / "data/embeddings" # change to finetuned_embeddings for finetuning
 MODEL_CHECKPOINTS_DIR = PROJECT_ROOT / "models/checkpoints"
 
 LOSS_FUNCTION_DICT = {"gelu": torch.nn.GELU}
@@ -114,6 +115,7 @@ def evaluate(model, dataloader, criterion, device):
     pr_auc = average_precision_score(all_labels, all_probs) if len(np.unique(all_labels)) > 1 else float('nan')
     tn, fp, fn, tp = confusion_matrix(all_labels, all_preds, labels=[0,1]).ravel()
     specificity = tn / (tn + fp) if (tn + fp) > 0 else float('nan')
+    fpr, tpr, thresholds = roc_curve(all_labels, all_probs)
 
     return {
         'loss': avg_loss,
@@ -126,7 +128,10 @@ def evaluate(model, dataloader, criterion, device):
         'recall_1': recall[1],
         'roc_auc': roc_auc,
         'pr_auc': pr_auc,
-        'specificity': specificity
+        'specificity': specificity,
+        'fpr': fpr,
+        'tpr': tpr,
+        'thresholds': thresholds,
     }
 
 
@@ -141,9 +146,11 @@ def main():
         'train_loss', 'train_accuracy', 'train_f1', 'train_kappa',
         'train_precision_0', 'train_precision_1', 'train_recall_0', 'train_recall_1',
         'train_roc_auc', 'train_pr_auc', 'train_specificity',
+        'train_fpr', 'train_tpr', 'train_thresholds',
         'test_loss', 'test_accuracy', 'test_f1', 'test_kappa',
         'test_precision_0', 'test_precision_1', 'test_recall_0', 'test_recall_1',
         'test_roc_auc', 'test_pr_auc', 'test_specificity',
+        'test_fpr', 'test_tpr', 'test_thresholds',
         'lr'
     ]
     results_df = pd.DataFrame(columns=results_cols)
@@ -166,12 +173,15 @@ def main():
                 dropout_rate=model_config['dropout_rate'],
                 activation_function=LOSS_FUNCTION_DICT[model_config['activation_function']]
             )
-        else:
+        elif args.model_name == "CrossModalFusion":
             model = CrossModalFusion(
                 embed_dim=model_config['embed_dim'],
                 num_heads=model_config['num_heads'],
                 num_classes=2
             )
+        else: # binary classifier
+            model = BinaryClassifier(model_config['embedding_size'])
+
         logger.info("Model architecture:\n%s", model)
         logger.info("Training hyperparameters: %s", train_config)
         logger.info("Model hyperparameters: %s", model_config)
