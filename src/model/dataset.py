@@ -5,7 +5,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 import pickle
-
+import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CLEAN_DATA = PROJECT_ROOT / "data/clean"
