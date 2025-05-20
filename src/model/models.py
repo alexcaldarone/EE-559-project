@@ -7,15 +7,15 @@ class BinaryClassifier(nn.Module):
     def __init__(self, embedding_size):
         super(BinaryClassifier, self).__init__()
         self.fc1 = nn.Linear(embedding_size * 2, 128)  # Combine image + text embeddings
-        self.fc2 = nn.Linear(128, 1)
+        self.fc2 = nn.Linear(128, 2)
         self.sigmoid = nn.Sigmoid()
     
     def forward(self, image_emb, text_emb):
         # Concatenate the image and text embeddings
-        combined_emb = torch.cat((image_emb, text_emb), dim=1)
+        combined_emb = torch.cat((image_emb, text_emb), dim=1).reshape(1, -1)
         x = torch.relu(self.fc1(combined_emb))
         x = self.fc2(x)
-        return self.sigmoid(x)
+        return x
     
 class MultiModalClassifier(nn.Module):
     def __init__(
@@ -94,6 +94,7 @@ class MultiModalClassifier(nn.Module):
         return logits
 
 class CrossModalFusion(nn.Module):
+    # add activation functions here
     def __init__(self, embed_dim: int, num_heads: int, num_classes: int, clip_emd_dim: int = 512):
         super().__init__()
         # video summary projector
@@ -105,7 +106,9 @@ class CrossModalFusion(nn.Module):
         # final classifier, pooling attended text + video summary
         self.classifier = nn.Sequential(
             nn.LayerNorm(2 * embed_dim),
-            nn.Linear(2 * embed_dim, num_classes)
+            nn.Linear(2* embed_dim, embed_dim),
+            nn.LayerNorm(embed_dim),
+            nn.Linear(embed_dim, num_classes)
         )
 
     def forward(self, video_emb: torch.Tensor, text_emb: torch.Tensor):
