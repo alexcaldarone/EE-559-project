@@ -12,7 +12,6 @@ from src.data_processing.videos_processing import process_video, extract_frames
 from src.data_processing.audios_processing import extract_audio_from_video, audio_to_text
 from src.utils.logger import setup_logger
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_DATA = PROJECT_ROOT / "data/raw"
 CLEAN_DATA = PROJECT_ROOT / "data/clean"
@@ -130,7 +129,7 @@ if __name__ == "__main__":
         extract_audio_from_snippets(paths["snippets"]["non_hateful"], paths["audios"]["non_hateful"], overwrite=args.overwrite)
 
     if "text" in steps:
-        model = whisper.load_model(args.model)
+        model = whisper.load_model(args.model).to("cuda")
         transcribe_audio_to_text(paths["audios"]["hateful"], paths["texts"]["hateful"], model, overwrite=args.overwrite)
         transcribe_audio_to_text(paths["audios"]["non_hateful"], paths["texts"]["non_hateful"], model, overwrite=args.overwrite)
 
