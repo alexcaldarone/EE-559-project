@@ -1,17 +1,13 @@
 train_hyperparams:
   batch_size: 1               # possibly effective batch=16 via accumulation
-  epochs: 12
-  lr: 5e-5
+  epochs: 5
+  lr: 1e-5
   optimizer: AdamW
   weight_decay: 1e-4
-  scheduler:
+  scheduler: # keep this?
     type: cosine              # or linear warmup+decay
     warmup_steps: 1000
   seeds: [42, 7, 2021, 123456, 987654321, 31415926, 27182818, 1618033, 19937, 5489]
-
-
-clip:
-  model_name: "openai/clip-vit-base-patch32"
 
 models:
   MultiModalClassifier:
