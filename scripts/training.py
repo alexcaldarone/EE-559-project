@@ -1,7 +1,6 @@
 import argparse
 import os
 from pathlib import Path
-import yaml
 import random
 from datetime import datetime
 
@@ -11,21 +10,27 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from transformers import CLIPModel, CLIPProcessor, CLIPTokenizer
-from sklearn.metrics import (
-    f1_score,
-    cohen_kappa_score,
-    precision_score,
-    recall_score,
-    roc_auc_score,
-    average_precision_score,
-    confusion_matrix,
-    roc_curve
+
+
+from src.model.models import (
+    BinaryClassifier, 
+    MultiModalClassifier, 
+    CrossModalFusion,
+    BinaryClassifierNoImage,
+    BinaryClassifierNoText
 )
-
-from src.model.models import BinaryClassifier, MultiModalClassifier, CrossModalFusion
-from src.model.dataset import PrecomputedEmbeddingsDataset, video_batcher
+from src.model.dataset import (
+    PrecomputedEmbeddingsDataset, 
+    RandomAdversarialVideoTextDataset,
+    AugmentedDataset,
+    video_batcher
+)
 from src.utils.logger import setup_logger
-
+from src.utils.training_utils import (
+    set_seed,
+    load_config,
+    evaluate
+)
 
 logger = setup_logger(f"training_{datetime.now().strftime('%Y%m%d_%H%M')}")
 
@@ -33,26 +38,10 @@ logger = setup_logger(f"training_{datetime.now().strftime('%Y%m%d_%H%M')}")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_DATA = PROJECT_ROOT / "data/raw"
 CLEAN_DATA = PROJECT_ROOT / "data/clean"
-EMBEDDINGS_DIR = PROJECT_ROOT / "data/embeddings" # change to finetuned_embeddings for finetuning
 MODEL_CHECKPOINTS_DIR = PROJECT_ROOT / "models/checkpoints"
+AUGMENTED_DATA_DIR = PROJECT_ROOT / "data/embeddings_transformed"
 
 LOSS_FUNCTION_DICT = {"gelu": torch.nn.GELU}
-
-
-def load_config(config_path):
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
-
-
-def set_seed(seed: int):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Training pipeline")
@@ -68,78 +57,47 @@ def parse_args():
         required=True,
         help="Model name defined in config"
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--test_on_shuffled",
+        action="store_true",
+        help="Determine whether we test on the adversarially swapped data."
+    )
+    parser.add_argument(
+        "--modality_to_shuffle_in_test",
+        type=str,
+        required=False,
+        choices=["text", "image"],
+        help="Modality to swap when testing with the andversarial shuffling"
+    )
+    parser.add_argument(
+        "--finetune",
+        action="store_true",
+        help="Whether this tranining run uses finefuned embeddings or not"
+    )
+    parser.add_argument(
+        "--use-augmented-data",
+        action="store_true",
+        help="Determine whether to use augmented data for training"
+    )
+    args = parser.parse_args()
 
-
-def evaluate(model, dataloader, criterion, device):
-    model.eval()
-    total_loss = total_correct = total_samples = 0
-    all_preds, all_labels, all_probs = [], [], []
-
-    with torch.no_grad():
-        for frames_list, texts_list, labels in dataloader:
-            frames = frames_list[0].to(device)
-            text = texts_list[0].to(device)
-            labels = labels.to(device).long()
-            if labels.ndim == 0:
-                labels = labels.unsqueeze(0)
-
-            logits = model(frames, text)
-            labels = torch.tile(labels, (logits.size(0), 1)).squeeze(1).long()
-            loss = criterion(logits, labels)
-
-            probs = torch.softmax(logits, dim=1)[:, 1]
-            preds = logits.argmax(dim=1)
-
-            # check these work
-            all_labels.extend(labels.cpu().tolist())
-            all_preds.extend(preds.cpu().tolist())
-            all_probs.extend(probs.cpu().tolist())
-
-            total_correct += (preds == labels).sum().item()
-            total_loss += loss.item()
-            total_samples += labels.size(0)
-
-    all_labels = np.array(all_labels)
-    all_preds = np.array(all_preds)
-    all_probs = np.array(all_probs)
-
-    # Compute metrics
-    avg_loss = total_loss / len(dataloader)
-    accuracy = total_correct / total_samples
-    f1 = f1_score(all_labels, all_preds, average='binary')
-    kappa = cohen_kappa_score(all_labels, all_preds)
-    precision = precision_score(all_labels, all_preds, labels=[0,1], average=None)
-    recall = recall_score(all_labels, all_preds, labels=[0,1], average=None)
-    roc_auc = roc_auc_score(all_labels, all_probs) if len(np.unique(all_labels)) > 1 else float('nan')
-    pr_auc = average_precision_score(all_labels, all_probs) if len(np.unique(all_labels)) > 1 else float('nan')
-    tn, fp, fn, tp = confusion_matrix(all_labels, all_preds, labels=[0,1]).ravel()
-    specificity = tn / (tn + fp) if (tn + fp) > 0 else float('nan')
-    fpr, tpr, thresholds = roc_curve(all_labels, all_probs)
-
-    return {
-        'loss': avg_loss,
-        'accuracy': accuracy,
-        'f1': f1,
-        'kappa': kappa,
-        'precision_0': precision[0],
-        'precision_1': precision[1],
-        'recall_0': recall[0],
-        'recall_1': recall[1],
-        'roc_auc': roc_auc,
-        'pr_auc': pr_auc,
-        'specificity': specificity,
-        'fpr': fpr,
-        'tpr': tpr,
-        'thresholds': thresholds,
-    }
-
+    if args.test_on_shuffled and not args.modality_to_shuffle_in_test:
+        parser.error(
+            "--modality_to_shuffle_in_test is required when --test_on_shuffled is set"
+        )
+    
+    return args
 
 def main():
     args = parse_args()
     config = load_config(args.config)
     seeds = config['train_hyperparams'].get('seeds', [42])
 
+    if args.finetune:
+        EMBEDDINGS_DIR = PROJECT_ROOT / "data/finetuned_embeddings"
+    else:
+        EMBEDDINGS_DIR = PROJECT_ROOT / "data/embeddings"
+    
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_cols = [
         'seed', 'epoch',
@@ -179,6 +137,10 @@ def main():
                 num_heads=model_config['num_heads'],
                 num_classes=2
             )
+        elif args.model_name == "BinaryClassifierNoImage":
+            model = BinaryClassifierNoImage(model_config['embedding_size'])
+        elif args.model_name == "BinaryClassifierNoText":
+            model = BinaryClassifierNoText(model_config['embedding_size'])
         else: # binary classifier
             model = BinaryClassifier(model_config['embedding_size'])
 
@@ -208,14 +170,41 @@ def main():
         split_idx = int(len(video_ids) * 0.8)
         train_ids, test_ids = video_ids[:split_idx], video_ids[split_idx:]
 
+        if args.use_augmented_data:
+            train_ds = AugmentedDataset(
+                embedding_dir1=AUGMENTED_DATA_DIR,
+                embedding_dir2=EMBEDDINGS_DIR,
+                prob=0.8, # change this to be param from config file
+                split=train_ids
+            )
+        else:
+            train_ds = PrecomputedEmbeddingsDataset(EMBEDDINGS_DIR, train_ids)
+        
+        if args.test_on_shuffled:
+            shuffle_text = True if args.modality_to_shuffle_in_test == "text" else False
+            test_ds = RandomAdversarialVideoTextDataset(test_ids, logger, device, EMBEDDINGS_DIR, shuffle_text=shuffle_text)
+        else:
+            test_ds = PrecomputedEmbeddingsDataset(EMBEDDINGS_DIR, test_ids)
+        
         train_loader = DataLoader(
-            PrecomputedEmbeddingsDataset(EMBEDDINGS_DIR, train_ids),
+            train_ds,
             batch_size=train_config['batch_size'], shuffle=True, collate_fn=video_batcher
         )
         test_loader = DataLoader(
-            PrecomputedEmbeddingsDataset(EMBEDDINGS_DIR, test_ids),
+            test_ds,
             batch_size=1, shuffle=False, collate_fn=video_batcher
         )
+
+        # define paths to save model weights and result csv
+        subdir = 'train_normal_test_on_shuffled' if args.test_on_shuffled else 'training_simple'
+        finetune_suffix = '_finetuned' if args.finetune else ''
+        shuffle_suffix  = '_shuffled'  if args.test_on_shuffled else ''
+        if args.test_on_shuffled:
+            modality_shuffle_suffix = '_text' if args.modality_to_shuffle_in_test == "text" else '_image'
+        else:
+            modality_shuffle_suffix = ''
+        model_run_dir = MODEL_CHECKPOINTS_DIR / subdir / f"{args.model_name}_{timestamp}{finetune_suffix}{shuffle_suffix}"
+        model_run_dir.mkdir(parents=True, exist_ok=True)
 
         # Training loop with metrics
         for epoch in range(train_config['epochs']):
@@ -261,12 +250,18 @@ def main():
             results_df.loc[len(results_df)] = row
     
         # save final model
-        ckpt_path = MODEL_CHECKPOINTS_DIR / f"{args.model_name}_seed{seed}_epoch{epoch+1}_{timestamp}.pt"
+        ckpt_name = f"seed{seed}_epoch{epoch+1}.pt"
+        ckpt_path = model_run_dir / ckpt_name
         torch.save(model.state_dict(), ckpt_path)
-        logger.info(f"Saved model to {ckpt_path}")
+        logger.info(f"Saved model weights to {ckpt_path}")
 
     # Save results
-    out_path = PROJECT_ROOT / 'results' / f"{args.model_name}_{timestamp}.csv"
+    results_dir = PROJECT_ROOT / 'results' / subdir
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    # saving result csv
+    fname = f"{args.model_name}_{timestamp}{finetune_suffix}{shuffle_suffix}{modality_shuffle_suffix}.csv"
+    out_path = results_dir / fname
     results_df.to_csv(out_path, index=False)
     logger.info(f"Saved results to {out_path}")
 
