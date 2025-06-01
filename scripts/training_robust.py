@@ -66,18 +66,31 @@ def parse_args():
         help="Whether this tranining run uses finefuned embeddings or not"
     )
     parser.add_argument(
-        "--modality_to_swap",
+        "--modality_to_shuffle",
         type=str,
         required=True,
         choices=["text", "image"],
         help="Decide which modality to swap in the training and (possibly) testing"
     )
     parser.add_argument(
-        "--text_swapped",
+        "--modality_to_shuffle_in_test",
+        type=str,
+        choices=["text", "image"],
+        help="Decide which modality to swap in the training and (possibly) testing"
+    )
+    parser.add_argument(
+        "--test_on_shuffled",
         action="store_true",
         help="Determine whether to test on the swapped data (if not passed test on the normal data)"
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    if args.test_on_shuffled and not args.modality_to_shuffle_in_test:
+        parser.error(
+            "--modality_to_shuffle_in_test is required when --test_on_shuffled is set"
+        )
+    
+    return args
 
 def main():
     args = parse_args()
@@ -111,7 +124,7 @@ def main():
 
         # load the model from the directory models/checkpoints
         model_name, model_timestamp = args.model_name.split("-")
-        model_path = find_model_weights(MODEL_CHECKPOINTS_DIR, f"{model_name}_seed{seed}", f"{model_timestamp}.pt")
+        model_path = find_model_weights(MODEL_CHECKPOINTS_DIR / "training_simple", model_name, model_timestamp, seed, args.finetune)
         model_state_dict = torch.load(model_path, map_location=device)
 
         model_config = config['models'][model_name]
@@ -167,15 +180,20 @@ def main():
         split_idx = int(len(video_ids) * 0.8)
         train_ids, test_ids = video_ids[:split_idx], video_ids[split_idx:]
 
-        if args.modality_to_swap == "text":
+        if args.modality_to_shuffle == "text":
             shuffle_text = True
         else:
             shuffle_text = False
         
+        if args.modality_to_shuffle_in_test == "text":
+            shuffle_text_on_test = True
+        else:
+            shuffle_text_on_test = False
+        
         train_ds = RandomAdversarialVideoTextDataset(train_ids, logger, device, EMBEDDINGS_DIR, shuffle_text=shuffle_text)
 
-        if args.text_swapped:
-            test_ds = RandomAdversarialVideoTextDataset(test_ids, logger, device, EMBEDDINGS_DIR, shuffle_text=shuffle_text)
+        if args.test_on_shuffled:
+            test_ds = RandomAdversarialVideoTextDataset(test_ids, logger, device, EMBEDDINGS_DIR, shuffle_text=shuffle_text_on_test)
         else:
             test_ds = PrecomputedEmbeddingsDataset(EMBEDDINGS_DIR, test_ids)
 
@@ -187,10 +205,16 @@ def main():
             test_ds,
             batch_size=1, shuffle=False, collate_fn=video_batcher
         )
-        #test_loader = DataLoader(
-        #    RandomAdversarialVideoTextDataset(test_ids, logger, device, EMBEDDINGS_DIR),
-        #   batch_size=1, shuffle=False, collate_fn=video_batcher
-        #)
+        
+        subdir = "robust_training"
+        finetune_suffix = '_finetuned' if args.finetune else ''
+        shuffle_suffix  = '_shuffled'  if args.test_on_shuffled else ''
+        if args.test_on_shuffled:
+            modality_shuffle_suffix = '_text' if args.modality_to_shuffle_in_test == "text" else '_image'
+        else:
+            modality_shuffle_suffix = ''
+        model_run_dir = MODEL_CHECKPOINTS_DIR / subdir / f"{args.model_name}_{timestamp}{finetune_suffix}{shuffle_suffix}"
+        model_run_dir.mkdir(parents=True, exist_ok=True)
 
         # Training loop with metrics
         for epoch in range(train_config['epochs']):
@@ -237,17 +261,20 @@ def main():
     
         # save final model
         if not args.finetune:
-            ckpt_path = MODEL_CHECKPOINTS_DIR / f"robust_training/{args.model_name}_seed{seed}_epoch{epoch+1}_{timestamp}_swapped_{args.modality_to_swap}.pt"
+            ckpt_path = MODEL_CHECKPOINTS_DIR / f"robust_training/{args.model_name}_seed{seed}_epoch{epoch+1}_{timestamp}_swapped_{args.modality_to_shuffle}.pt"
         else:
-            ckpt_path = MODEL_CHECKPOINTS_DIR / f"robust_traning7{args.model_name}_seed{seed}_epoch{epoch+1}_{timestamp}_swapped_{args.modality_to_swap}_finetune.pt"
+            ckpt_path = MODEL_CHECKPOINTS_DIR / f"robust_traning7{args.model_name}_seed{seed}_epoch{epoch+1}_{timestamp}_swapped_{args.modality_to_shuffle}_finetune.pt"
         torch.save(model.state_dict(), ckpt_path)
         logger.info(f"Saved model to {ckpt_path}")
 
     # Save results
-    if not args.finetune:
-        out_path = PROJECT_ROOT / 'results/robust_training' / f"{args.model_name}_{timestamp}_swapped_{args.modality_to_swap}.csv"
-    else:
-        out_path = PROJECT_ROOT / 'results/robust_training' / f"{args.model_name}_{timestamp}_swapped_{args.modality_to_swap}_finetuned.csv"
+    # Save results
+    results_dir = PROJECT_ROOT / 'results/robust_training'
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    # saving result csv
+    fname = f"{args.model_name}_{timestamp}{finetune_suffix}{shuffle_suffix}{modality_shuffle_suffix}.csv"
+    out_path = results_dir / fname
     results_df.to_csv(out_path, index=False)
     logger.info(f"Saved results to {out_path}")
 
