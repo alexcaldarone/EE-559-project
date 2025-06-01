@@ -1,5 +1,7 @@
 import random
 import yaml
+import os
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -14,6 +16,12 @@ from sklearn.metrics import (
     roc_curve
 )
 
+from src.model.models import (
+    BinaryClassifier,
+    CrossModalFusion,
+    MultiModalClassifier
+)
+
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
@@ -26,6 +34,21 @@ def set_seed(seed: int):
 def load_config(config_path):
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
+
+def find_model_weights(directory, model_name, timestamp, seed, finetune):
+    """
+    Returns the first filename in `directory` that starts with `prefix` and ends with `suffix`.
+    Raises FileNotFoundError if none found.
+    """
+    if not finetune:
+        path = Path(directory / f"{model_name}_{timestamp}/")
+    else:
+        path = Path(directory / f"{model_name}_{timestamp}_finetuned/")
+    # find file with specfied seed
+    for f in path.iterdir():
+        if f.is_file() and f.name.startswith(f"seed{seed}"):
+            fname = f
+    return os.path.join(path, fname)
 
 def evaluate(model, dataloader, criterion, device):
     model.eval()
@@ -89,3 +112,12 @@ def evaluate(model, dataloader, criterion, device):
         'tpr': tpr,
         'thresholds': thresholds,
     }
+
+def select_model(model_name: str):
+    model_dict = {
+        "BianryClassifier": BinaryClassifier,
+        "CrossModalFusion": CrossModalFusion,
+        "MultiModalClassifier": MultiModalClassifier
+    }
+
+    return model_dict[model_name]
