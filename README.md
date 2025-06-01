@@ -1,10 +1,14 @@
 # EE-559-project
-Final mini-project for EE-559 course at EPFL (Spring 2025)
+_Final mini-project for EE-559 course at EPFL (Spring 2025)_
+
+**Project description:** In this work, we present a multimodal approach to detecting hateful content in short videos by leveraging CLIP embeddings and finetuning them. We demonstrate that swapping or masking one modality (visual or textual) can significantly degrade classification performance -- an effect we term ``hateful content masking" -- and show that incorporating such adversarially masked samples into training enhances model robustness. Our experiments reveal that textual embeddings are particularly informative for hate detection.
 
 
 ## Repo structure
 ```
 project-root/
+├── configs/                         # Config files
+│
 ├── data/                            # All datasets (not committed to Git)
 │   ├── clean/                       # Preprocessed data
 │   │   ├── audios/                 # Extracted audio files
@@ -15,18 +19,28 @@ project-root/
 │       ├── text/
 │       ├── videos/
 │       └── HateMM_annotation.csv   # Annotations file
+│   ├── embeddings/                 # embeddings from clip
+│   ├── finetuned_embeddings/       # embeddings from finetuned clip
+│   └── embeddings_transformed/     # embeddings of augmented data (not used)
 │
 ├── logs/                            # Logging output
 │
 ├── models/                          # Saved models and checkpoints
 │   └── checkpoints/
+│       ├── clip_finetune/           # finetuned clip weights
+│       ├── robust_training/         # weights of robust models
+│       ├── train_normal_test_on_shuffled/
+│       └── training_simple/ 
+│
+├── notebooks/ 
 │
 ├── results/                         # Outputs, metrics
 │
-├── scripts/                         # CLI scripts
+├── scripts/                         # CLI scripts 
 │
 ├── src/                             # Source code for the project
-│   ├── data_processing/            
+│   ├── data_processing/    
+│   ├── model/         
 │   └── utils/                      
 │
 ├── .gitignore                       # Git ignore rules
@@ -36,6 +50,9 @@ project-root/
 └── README.md                        # Project documentation
 
 ```
+
+## Setting up the environment
+
 
 ## How to reproduce
 
@@ -66,3 +83,51 @@ project-root/
     - `--overwrite`: (Optional) If passed, will overwrite existing files instead of skipping them
 
     Make sure to run this command from the **project root**, not from inside the `scripts/` folder.
+
+3. **Obtaining embeddings with CLIP**
+
+    Once the clean data has been obtained, you can extract the embeddings using the CLIP model by running:
+    ```bash
+    python3 -m scripts.compute_embeddings
+    ```
+
+4. **Finetuning CLIP**
+
+    In order to finetune CLIP to obtain better embeddings, run the following command:
+    ```bash
+    python3 -m scripts.finetune_clip --config configs/finetune_clip.yml
+    ```
+    where `configs/finetune_clip.yml` is the config file containing the setting for the finetuning of the model.
+
+5. **Training + Model Evaluation**
+
+    To train the model and evaluate its performance run:
+    ```bash
+    python3 -m scripts.training --config configs/training_simple.yml --model_name [model_name] --finetune --test_on_shuffled --modality_to_shuffle_in_test [modality]
+    ```
+    where:
+
+    - `configs/training_simple.yml` contains the configuration file with the traning hyperparameters
+    
+    - `--model_name [model_name]` indicates the names of the model to train. Currently options are: `BinaryClassifer`, `CrossModalFusion` and `?`
+    
+    - `--finetune` is an optional boolean flag used to indicate whether to train using the embeddings from the finetuned CLIP
+    
+    - `--test_on_shuffled` is a boolean flag that indicates whether to use the data with swapped modalities for hateful content on the test set
+    
+    - `--modality_to_shuffle_in_test [modality]` indicates what modality to shuffle on the test set. Can be `text` or `image`.
+
+6. **"Robust" training**
+
+    In order to include the data with the swapped modalities into the traning set and make the model robust to this type of data corruption, run the following command:
+    ```bash
+
+    ```
+
+---
+
+### Contributors
+
+- Alex John Caldarone, `alex.caldarone@epfl.ch`
+- Stephan Hengl, `stephan.hengl@epfl.ch`
+- Samuel Ahou, `samuel.ahou@epfl.ch`
