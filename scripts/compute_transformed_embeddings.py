@@ -1,3 +1,13 @@
+"""
+In this file we try data augmentation on text and frames of the videos 
+to see if this had an impact on the final model.
+
+After establishing that this does not have any effect, we dropped this route
+for an alternative one. 
+We leave the code here for completeness and transparency, though this script
+is not required in order to reproduce the results presented in the report and poster.
+"""
+
 import os
 from pathlib import Path
 from PIL import Image
@@ -14,9 +24,16 @@ from tqdm import tqdm
 from transformers import CLIPProcessor, CLIPModel
 
 from src.utils.logger import setup_logger
-
-
-
+from src.utils.training_utils import (
+    load_config,
+    set_seed
+)
+from src.utils.embedding_utils import (
+    validate_video_ids,
+    get_video_ids,
+    load_frames,
+    load_text
+)
 
 # Default data directory - replace with your actual path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -27,120 +44,6 @@ KEYWORDS_DATA = PROJECT_ROOT / "data/flagged_words.csv"
 TRANSFORMED_EMBEDDING_DIR = PROJECT_ROOT / "data/embeddings_transformed"
 
 logger = setup_logger("precompute_transformed_embeddings")
-
-def load_config(config_path):
-    """Load configuration from a YAML file"""
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
-    
-def set_seed(seed: int):
-    """Set global seed for reproducibility"""
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-
-def get_video_ids(root_dir):
-    """Get all available video IDs by checking both hateful and non-hateful directories"""
-    video_ids = []
-    
-    for label in ['hateful', 'non-hateful']:
-        frames_dir = os.path.join(root_dir, f'frames/{label}')
-        if os.path.exists(frames_dir):
-            video_ids.extend([vid for vid in os.listdir(frames_dir) 
-                             if os.path.isdir(os.path.join(frames_dir, vid))])
-    
-    return video_ids
-
-def validate_video_ids(video_ids, root_dir, logger):
-    """Validate video IDs and return only those with valid frames and text"""
-    valid_ids = []
-    
-    for video_id in video_ids:
-        try:
-            video_label = 'non-hateful' if 'non_hate' in video_id else 'hateful'
-            
-            # Check if video folder exists
-            video_folder = os.path.join(root_dir, f'frames/{video_label}/{video_id}/')
-            
-            # Check if text file exists
-            text_file = os.path.join(root_dir, f'texts/{video_label}/{video_id}.txt')
-            
-            if not os.path.exists(video_folder):
-                logger.warning(f"Skipping {video_id}: folder not found: {video_folder}")
-                continue
-                
-            frame_files = [f for f in os.listdir(video_folder) 
-                          if f.endswith((".jpg", ".png"))]
-            if not frame_files:
-                logger.warning(f"Skipping {video_id}: no frame files in {video_folder}")
-                continue
-                
-            if not os.path.exists(text_file):
-                logger.warning(f"Skipping {video_id}: text file not found: {text_file}")
-                continue
-                
-            # All checks passed, this is a valid video ID
-            valid_ids.append(video_id)
-            
-        except Exception as e:
-            logger.error(f"Error validating {video_id}: {str(e)}")
-            continue
-            
-    return valid_ids
-
-def load_text(video_id, root_dir, logger):
-    """Load and process text for a video"""
-    video_label = 'non-hateful' if 'non_hate' in video_id else 'hateful'
-    text_file = os.path.join(root_dir, f'texts/{video_label}/{video_id}.txt')
-    
-    try:
-        with open(text_file, 'r') as f:
-            text = f.read().strip()
-
-        if not text:
-            logger.warning(f"Warning: Empty text for {video_id}, using placeholder.")
-            text = "empty"
-    except Exception as e:
-        logger.error(f"Error loading text for {video_id}: {str(e)}")
-        text = "empty"
-    
-    # Chunk the text into blocks of 30 words
-    text = text.split()
-    text_chunks = [' '.join(text[i:i + min(30, len(text))]) for i in range(0, len(text), 30)]
-    
-    return text_chunks
-
-def load_frames(video_id, root_dir, logger):
-    """Load frames for a video"""
-    video_label = 'non-hateful' if 'non_hate' in video_id else 'hateful'
-    video_folder = os.path.join(root_dir, f'frames/{video_label}/{video_id}/')
-    
-    try:
-        frame_files = sorted([
-            os.path.join(video_folder, fname)
-            for fname in os.listdir(video_folder)
-            if fname.endswith((".jpg", ".png"))
-        ])
-
-        if not frame_files:
-            raise FileNotFoundError(f"No frame files found for {video_id}")
-            
-        frames = []
-        for f in frame_files:
-            try:
-                img = Image.open(f).convert("RGB")
-                frames.append(img)
-            except Exception as e:
-                logger.warning(f"Error loading image {f}: {str(e)}")
-                continue
-                
-        return frames
-    except Exception as e:
-        logger.error(f"Error loading frames for {video_id}: {str(e)}")
-        return []
 
 def augment_text(text_chunks, keywords=None):
     """Augment text chunk to mask out some words.
@@ -371,7 +274,7 @@ def main():
             video_id, image_embeddings, text_embedding, label, TRANSFORMED_EMBEDDING_DIR
         )
         
-        logger.info(f"Saved embeddings for {video_id} to {saved_file}")
+        #logger.info(f"Saved embeddings for {video_id} to {saved_file}")
         index_data.append({'video_id': video_id, 'label': label, 'file': saved_file})
     
     # Save index file

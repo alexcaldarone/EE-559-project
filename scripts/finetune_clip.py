@@ -42,6 +42,9 @@ def build_classification_head(embed_dim: int):
     )
 
 def freeze_all_but_projections(model):
+    """
+    Freezes all CLIP layers except for the last projection layers
+    """
     for name, param in model.named_parameters():
         if not ("vision_projection" in name or "text_projection" in name):
             param.requires_grad = False
@@ -85,10 +88,12 @@ def evaluate(model, head, loader, criterion, device):
     return total_loss / total_samples
 
 def finetune_clip(config, device):
+    """
+    Function used to finetune the lst projection layers of the CLIP model
+    """
     # Load CLIP
     model = CLIPModel.from_pretrained(config['model']).to(device)
     processor = CLIPProcessor.from_pretrained(config['model'])
-    # Freeze nothing: fine-tune both encoders
 
     freeze_all_but_projections(model)
 
@@ -218,8 +223,11 @@ def finetune_clip(config, device):
     head_path = MODEL_CHECKPOINTS_DIR / 'classification_head.pt'
     torch.save(head.state_dict(), head_path)
 
-# replace with process batch
 def extract_embeddings(config, device):
+    """
+    Loads the weigths of the previously finetuned CLIP model and saves the embeddings of the
+    dataset using this new model
+    """
     # Load fine-tuned CLIP
     model = CLIPModel.from_pretrained(MODEL_CHECKPOINTS_DIR / 'clip-finetuned').to(device)
     processor = CLIPProcessor.from_pretrained(MODEL_CHECKPOINTS_DIR / 'clip-finetuned')

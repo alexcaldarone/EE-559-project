@@ -9,15 +9,12 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from transformers import CLIPModel, CLIPProcessor, CLIPTokenizer
 
 
 from src.model.models import (
     BinaryClassifier, 
     MultiModalClassifier, 
-    CrossModalFusion,
-    BinaryClassifierNoImage,
-    BinaryClassifierNoText
+    CrossModalFusion
 )
 from src.model.dataset import (
     PrecomputedEmbeddingsDataset, 
@@ -137,10 +134,6 @@ def main():
                 num_heads=model_config['num_heads'],
                 num_classes=2
             )
-        elif args.model_name == "BinaryClassifierNoImage":
-            model = BinaryClassifierNoImage(model_config['embedding_size'])
-        elif args.model_name == "BinaryClassifierNoText":
-            model = BinaryClassifierNoText(model_config['embedding_size'])
         else: # binary classifier
             model = BinaryClassifier(model_config['embedding_size'])
 
