@@ -53,6 +53,24 @@ project-root/
 
 ## Setting up the environment
 
+In order to reproduce the experiments the Docker image needs to be built. You can do this by building it using the Dockerfile provided. 
+
+If running on the runai EPFL cluster, 
+
+- To build an interactive job use the following image:
+
+    ```bash
+    runai submit --image registry.rcp.epfl.ch/ee-559-acaldaro/my-toolbox:v0.2 [rest of command]
+    ```
+
+- To use a regular job:
+
+    ```bash
+    runai submit --image registry.rcp.epfl.ch/ee-559-acaldaro/my-toolbox:v0.2 [rest of command for rcp] \
+        --command pip install -r requirements.txt && \
+        [python command]
+    ```
+    for the possible python commands needed to reproduce the results of the project, see below.
 
 ## How to reproduce
 
@@ -103,7 +121,11 @@ project-root/
 
     To train the model and evaluate its performance run:
     ```bash
-    python3 -m scripts.training --config configs/training_simple.yml --model_name [model_name] --finetune --test_on_shuffled --modality_to_shuffle_in_test [modality]
+    python3 -m scripts.training --config configs/training_simple.yml \
+        --model_name [model_name] \
+        --finetune \
+        --test_on_shuffled \
+        --modality_to_shuffle_in_test [modality]
     ```
     where:
 
@@ -121,12 +143,32 @@ project-root/
 
     In order to include the data with the swapped modalities into the traning set and make the model robust to this type of data corruption, run the following command:
     ```bash
-
+    python3 -m scripts.training_robust --config configs/training_robust.yml \
+        --finetuned \
+        --modality_to_shuffle [modality] \
+        --test_on_shuffled \
+        --modality_to_shuffle_in_test [modality] 
     ```
+    where:
 
----
+    - `configs/training_robust.yml` contains the configuration file with the robust traning hyperparameters
+    
+    - `--finetune` is an optional boolean flag used to indicate whether to train using the embeddings from the finetuned CLIP
 
-### Contributors
+    - `--modality_to_shuffle [modality]` indicates what modality to shuffle on the train set for the further robust training epochs. Can be `text` or `image`.
+    
+    - `--test_on_shuffled` is a boolean flag that indicates whether to use the data with swapped modalities for hateful content on the test set
+    
+    - `--modality_to_shuffle_in_test [modality]` indicates what modality to shuffle on the test set. Can be `text` or `image`.
+
+## Results
+
+The results of the various training runs are saved in the `results/` directory. See the [relevant README](./results/README.md) file for the result directory structure.
+
+The `notebooks/` directory contains the notebook used to analyse the results and produce the plots presented on the poster.
+
+
+## Contributors
 
 - Alex John Caldarone, `alex.caldarone@epfl.ch`
 - Stephan Hengl, `stephan.hengl@epfl.ch`
