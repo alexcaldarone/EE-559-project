@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Define a simple binary classifier
+
 class BinaryClassifier(nn.Module):
     def __init__(self, embedding_size):
         super(BinaryClassifier, self).__init__()
@@ -12,6 +12,8 @@ class BinaryClassifier(nn.Module):
     
     def forward(self, image_emb, text_emb):
         # Concatenate the image and text embeddings
+        image_emb = image_emb.mean(dim=0)
+        text_emb = text_emb.mean(dim=0)
         combined_emb = torch.cat((image_emb, text_emb), dim=1).reshape(1, -1)
         x = torch.relu(self.fc1(combined_emb))
         x = self.fc2(x)
@@ -77,33 +79,27 @@ class MultiModalClassifier(nn.Module):
         img_tok = self.image_token.expand(B, 1, -1)
         txt_tok = self.text_token.expand(B, 1, -1)
         
-        # Concatenate the sequence
         x = torch.cat([cls_tok, img_tok, image_embeds, txt_tok, text_embeds], dim=1)  # shape: [B, 1+1+I+1+T, D]
 
-        # Add positional embeddings (truncate if needed) ?
+        # Add positional embeddings
         x = x + self.pos_embed[:, :x.size(1), :]
 
-        # Pass through transformer
         x = self.transformer(x)
 
-        # Take [CLS] token output
+        # take [CLS]
         cls_out = x[:, 0, :]  # [B, D]
 
-        # Final classifier
         logits = self.classifier(cls_out)  # [B, num_classes]
         return logits
 
 class CrossModalFusion(nn.Module):
-    # add activation functions here
     def __init__(self, embed_dim: int, num_heads: int, num_classes: int, clip_emd_dim: int = 512):
         super().__init__()
-        # video summary projector
         self.video_proj = nn.Linear(clip_emd_dim, embed_dim)
-        # cross‐attention: text queries → video K/V
         self.cross_attn = nn.MultiheadAttention(
             embed_dim=embed_dim, num_heads=num_heads, batch_first=True
         )
-        # final classifier, pooling attended text + video summary
+        # pooling text + video
         self.classifier = nn.Sequential(
             nn.LayerNorm(2 * embed_dim),
             nn.Linear(2* embed_dim, embed_dim),
@@ -120,9 +116,6 @@ class CrossModalFusion(nn.Module):
         vid_sum = video_emb.mean(dim=1)
         vid_key = vid_sum.unsqueeze(1)
         vid_val = self.video_proj(vid_key)
-
-        #print(vid_val.shape)
-        #print(text_emb.shape)
 
         attn_out, _ = self.cross_attn(
             query=text_emb,
