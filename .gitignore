@@ -179,3 +179,6 @@ data/**/*.mp4
 data/**/*.txt
 data/**/*.jpg
 data/**/*.pkl
+
+#logs
+logs/
