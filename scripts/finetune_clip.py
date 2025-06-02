@@ -15,8 +15,13 @@ from transformers import CLIPModel, CLIPProcessor
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
-from src.model.dataset import video_batcher
+from src.model.dataset import RawVideoDataset, raw_video_collate_fn
 from src.utils.logger import setup_logger
+from src.utils.training_utils import set_seed
+from src.utils.embedding_utils import (
+    get_video_ids,
+    validate_video_ids
+)
 
 logger = setup_logger("finetune_clip")
 
@@ -25,186 +30,6 @@ RAW_DATA = PROJECT_ROOT / "data/raw"
 CLEAN_DATA = PROJECT_ROOT / "data/clean"
 FINETUNED_EMBEDDINGS_DIR = PROJECT_ROOT / "data/finetuned_embeddings"
 MODEL_CHECKPOINTS_DIR = PROJECT_ROOT / "models/checkpoints/clip_finetune"
-
-def set_seed(seed: int):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-# from scripts/compute_embeddings.py (move to utils)
-def get_video_ids(root_dir):
-    """Get all available video IDs by checking both hateful and non-hateful directories"""
-    video_ids = []
-    
-    for label in ['hateful', 'non-hateful']:
-        frames_dir = os.path.join(root_dir, f'frames/{label}')
-        if os.path.exists(frames_dir):
-            video_ids.extend([vid for vid in os.listdir(frames_dir) 
-                             if os.path.isdir(os.path.join(frames_dir, vid))])
-    
-    return video_ids
-
-# from scripts/compute_embeddings.py (move to utils)
-def validate_video_ids(video_ids, root_dir, logger):
-    """Validate video IDs and return only those with valid frames and text"""
-    valid_ids = []
-    
-    for video_id in video_ids:
-        try:
-            video_label = 'non-hateful' if 'non_hate' in video_id else 'hateful'
-            
-            # Check if video folder exists
-            video_folder = os.path.join(root_dir, f'frames/{video_label}/{video_id}/')
-            
-            # Check if text file exists
-            text_file = os.path.join(root_dir, f'texts/{video_label}/{video_id}.txt')
-            
-            if not os.path.exists(video_folder):
-                logger.warning(f"Skipping {video_id}: folder not found: {video_folder}")
-                continue
-                
-            frame_files = [f for f in os.listdir(video_folder) 
-                          if f.endswith((".jpg", ".png"))]
-            if not frame_files:
-                logger.warning(f"Skipping {video_id}: no frame files in {video_folder}")
-                continue
-                
-            if not os.path.exists(text_file):
-                logger.warning(f"Skipping {video_id}: text file not found: {text_file}")
-                continue
-                
-            # All checks passed, this is a valid video ID
-            valid_ids.append(video_id)
-            
-        except Exception as e:
-            logger.error(f"Error validating {video_id}: {str(e)}")
-            continue
-            
-    return valid_ids
-
-class RawVideoDataset(Dataset):
-    """
-    Dataset that returns raw frames and transcript for each video.
-    Assumes directory structure:
-      frames_root/hateful/<video_id>/*.jpg
-      frames_root/non-hateful/<video_id>/*.jpg
-      transcripts_root/hateful/<video_id>.txt
-      transcripts_root/non-hateful/<video_id>.txt
-
-    Samples up to `num_frames` per video uniformly.
-    """
-    def __init__(
-            self, 
-            root_dir: Path,
-            clean_data_dir: Path,
-            frames_root: Path, 
-            transcripts_root: Path,
-            valid_ids: list,
-            processor: CLIPProcessor,
-            logger
-        ):
-        self.ids = valid_ids
-        self.root_dir = Path(root_dir)
-        self.clean_data_dir = Path(clean_data_dir)
-        self.frames_root = Path(frames_root)
-        self.transcripts_root = Path(transcripts_root)
-        self.processor = processor
-        self.logger = logger
-
-
-    def __len__(self):
-        return len(self.ids)
-
-    def __getitem__(self, idx):
-        vid = self.ids[idx]
-        # Determine label by folder membership
-        video_label = 'non-hateful' if 'non_hate' in vid else 'hateful'
-        label = 1 if video_label == 'hateful' else 0
-
-        images = self.__load_frames(vid)
-        text = self.__load_text(vid)
-
-        return images, text, label, vid
-    
-    def __load_text(self, video_id):
-        """Load and process text for a video"""
-        video_label = 'non-hateful' if 'non_hate' in video_id else 'hateful'
-        text_file = os.path.join(self.clean_data_dir, f'texts/{video_label}/{video_id}.txt')
-        
-        try:
-            with open(text_file, 'r') as f:
-                text = f.read().strip()
-
-            if not text:
-                self.logger.warning(f"Warning: Empty text for {video_id}, using placeholder.")
-                text = "empty"
-        except Exception as e:
-            self.logger.error(f"Error loading text for {video_id}: {str(e)}")
-            text = "empty"
-        
-        # Chunk the text into blocks of 30 words
-        text = text.split()
-        text_chunks = [' '.join(text[i:i + min(30, len(text))]) for i in range(0, len(text), 30)]
-        
-        return text_chunks
-
-    def __load_frames(self, video_id):
-        """Load frames for a video"""
-        video_label = 'non-hateful' if 'non_hate' in video_id else 'hateful'
-        video_folder = os.path.join(self.clean_data_dir, f'frames/{video_label}/{video_id}/')
-        
-        try:
-            frame_files = sorted([
-                os.path.join(video_folder, fname)
-                for fname in os.listdir(video_folder)
-                if fname.endswith((".jpg", ".png"))
-            ])
-
-            if not frame_files:
-                raise FileNotFoundError(f"No frame files found for {video_id}")
-                
-            frames = []
-            for f in frame_files:
-                try:
-                    img = Image.open(f).convert("RGB")
-                    frames.append(img)
-                except Exception as e:
-                    self.logger.warning(f"Error loading image {f}: {str(e)}")
-                    continue
-                    
-            return frames
-        except Exception as e:
-            self.logger.error(f"Error loading frames for {video_id}: {str(e)}")
-            return []
-
-
-def collate_fn(batch, processor):
-    images_list, text_chunks_list, labels, vids = zip(*batch)
-    #print(images_list)
-    # Flatten images to list
-    flat_images = [img for images in images_list for img in images]
-    flat_texts = [" ".join(chunks) for chunks in text_chunks_list]
-    # Process via CLIPProcessor
-    
-    encodings_list = []
-    for frame in images_list[0]:
-        #print(frame)
-        #print(text_chunks_list, type(text_chunks_list))
-        encoded = processor(
-            text=text_chunks_list[0], 
-            images=frame,
-            return_tensors='pt', 
-            padding=True)
-        encodings_list.append(encoded)
-    #print("encoded all frames successfully")
-
-    # We need to keep track of offsets to recombine per-video
-    num_frames = [len(images) for images in images_list]
-    return encodings_list, torch.tensor(labels), vids, num_frames
 
 
 def build_classification_head(embed_dim: int):
@@ -313,13 +138,13 @@ def finetune_clip(config, device):
         train_dataset,
         batch_size=config['batch_size'],
         shuffle=True,
-        collate_fn=lambda b: collate_fn(b, processor)
+        collate_fn=lambda b: raw_video_collate_fn(b, processor)
     )
     test_loader   = DataLoader(
         test_dataset,
         batch_size=config['batch_size'],
         shuffle=False,
-        collate_fn=lambda b: collate_fn(b, processor)
+        collate_fn=lambda b: raw_video_collate_fn(b, processor)
     )
 
     writer = SummaryWriter(PROJECT_ROOT / "logs")
@@ -423,7 +248,7 @@ def extract_embeddings(config, device):
         dataset,
         batch_size=config['batch_size'],
         shuffle=True,
-        collate_fn=lambda b: collate_fn(b, processor)
+        collate_fn=lambda b: raw_video_collate_fn(b, processor)
     )
 
     for encoded_list, labels, vids, _ in tqdm(loader, desc="Computing finetuned embeddings"):
@@ -487,7 +312,7 @@ def main():
 
     set_seed(config["seed"])
     # Phase 1: Finetune CLIP
-    #finetune_clip(config, device)
+    finetune_clip(config, device)
     # Phase 2: Extract embeddings with finetuned weights
     extract_embeddings(config, device)
 
