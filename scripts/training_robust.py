@@ -13,9 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 from src.model.models import (
     BinaryClassifier, 
     MultiModalClassifier, 
-    CrossModalFusion,
-    BinaryClassifierNoImage,
-    BinaryClassifierNoText
+    CrossModalFusion
 )
 from src.model.dataset import (
     PrecomputedEmbeddingsDataset, 
@@ -146,10 +144,6 @@ def main():
                 num_heads=model_config['num_heads'],
                 num_classes=2
             )
-        elif model_name == "BinaryClassifierNoImage":
-            model = BinaryClassifierNoImage(model_config['embedding_size'])
-        elif model_name == "BinaryClassifierNoText":
-            model = BinaryClassifierNoText(model_config['embedding_size'])
         else: # binary classifier
             model = BinaryClassifier(model_config['embedding_size'])
         
