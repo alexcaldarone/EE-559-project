@@ -79,6 +79,9 @@ class RandomAdversarialVideoTextDataset(Dataset):
                               # False to shuffle videos instead
         ):
         """
+        Dataset class used for the training epochs that contain the examples of hateful data 
+        points with a swapped modality. 
+
         video_ids: unique identifiers for each video e.g. 'hate_video_1_snippet_0'
         embedding_dir: directory where video frame folders are stored (by default ../data/clean)
         shuffle_text: True if shuffle hateful texts into non-hateful texts, 
@@ -230,7 +233,9 @@ class RawVideoDataset(Dataset):
             self.logger.error(f"Error loading text for {video_id}: {str(e)}")
             text = "empty"
         
-        # Chunk the text into blocks of 30 words
+        # Chunk the text into blocks of 30 words 
+        # (downstream if this can't be done for a particular transcript the datapoint is 
+        # excluded from the training set)
         text = text.split()
         text_chunks = [' '.join(text[i:i + min(30, len(text))]) for i in range(0, len(text), 30)]
         
